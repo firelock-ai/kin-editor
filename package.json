@@ -31,27 +31,38 @@
     "commands": [
       {
         "command": "kin.search",
-        "title": "Kin: Semantic Search"
+        "title": "Kin: Semantic Search",
+        "category": "Kin"
       },
       {
         "command": "kin.overview",
-        "title": "Kin: Graph Overview"
+        "title": "Kin: Graph Overview",
+        "category": "Kin"
       },
       {
         "command": "kin.trace",
-        "title": "Kin: Trace Entity"
+        "title": "Kin: Trace Entity",
+        "category": "Kin"
       },
       {
         "command": "kin.init",
-        "title": "Kin: Initialize Repository"
+        "title": "Kin: Initialize Repository",
+        "category": "Kin"
       },
       {
         "command": "kin.status",
-        "title": "Kin: Show Status"
+        "title": "Kin: Show Status",
+        "category": "Kin"
+      },
+      {
+        "command": "kin.review",
+        "title": "Kin: Review Current File",
+        "category": "Kin"
       },
       {
         "command": "kin.refresh",
-        "title": "Kin: Refresh Explorer",
+        "title": "Kin: Refresh Entity Explorer",
+        "category": "Kin",
         "icon": "$(refresh)"
       }
     ],
@@ -90,9 +101,46 @@
           "command": "kin.search",
           "group": "kin@2",
           "when": "editorTextFocus"
+        },
+        {
+          "command": "kin.review",
+          "group": "kin@3",
+          "when": "editorTextFocus"
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "kin.search",
+        "key": "ctrl+shift+k s",
+        "mac": "cmd+shift+k s",
+        "when": "workspaceFolderCount > 0"
+      },
+      {
+        "command": "kin.trace",
+        "key": "ctrl+shift+k t",
+        "mac": "cmd+shift+k t",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "kin.overview",
+        "key": "ctrl+shift+k o",
+        "mac": "cmd+shift+k o",
+        "when": "workspaceFolderCount > 0"
+      },
+      {
+        "command": "kin.refresh",
+        "key": "ctrl+shift+k r",
+        "mac": "cmd+shift+k r",
+        "when": "workspaceFolderCount > 0"
+      },
+      {
+        "command": "kin.review",
+        "key": "ctrl+shift+k v",
+        "mac": "cmd+shift+k v",
+        "when": "editorTextFocus"
+      }
+    ],
     "configuration": {
       "title": "Kin",
       "properties": {
@@ -113,11 +161,22 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "test": "jest --passWithNoTests"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "roots": ["<rootDir>/src"],
+    "moduleFileExtensions": ["ts", "js", "json"],
+    "testMatch": ["**/__tests__/**/*.test.ts"]
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
+    "@types/jest": "^29.5.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
     "typescript": "^5.3.0",
     "@vscode/vsce": "^2.22.0"
   }

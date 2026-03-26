@@ -1,0 +1,124 @@
+{
+  "name": "kin",
+  "displayName": "Kin - Semantic VCS",
+  "description": "Semantic code intelligence powered by Kin's graph engine",
+  "version": "0.1.0",
+  "publisher": "firelock",
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "keywords": [
+    "kin",
+    "semantic",
+    "vcs",
+    "code intelligence",
+    "graph"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicholasgasior/kin-ecosystem"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "kin.search",
+        "title": "Kin: Semantic Search"
+      },
+      {
+        "command": "kin.overview",
+        "title": "Kin: Graph Overview"
+      },
+      {
+        "command": "kin.trace",
+        "title": "Kin: Trace Entity"
+      },
+      {
+        "command": "kin.init",
+        "title": "Kin: Initialize Repository"
+      },
+      {
+        "command": "kin.status",
+        "title": "Kin: Show Status"
+      },
+      {
+        "command": "kin.refresh",
+        "title": "Kin: Refresh Explorer",
+        "icon": "$(refresh)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "kin",
+          "title": "Kin",
+          "icon": "resources/kin-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "kin": [
+        {
+          "id": "kinExplorer",
+          "name": "Entity Explorer"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "kin.refresh",
+          "when": "view == kinExplorer",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "kin.trace",
+          "group": "kin@1",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "kin.search",
+          "group": "kin@2",
+          "when": "editorTextFocus"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Kin",
+      "properties": {
+        "kin.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the kin binary. Leave empty to auto-detect (~/.kin/bin/kin or PATH)."
+        },
+        "kin.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically activate Kin when a .kin/ directory is found in the workspace."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  }
+}

@@ -1,8 +1,10 @@
 .vscode/**
 .vscode-test/**
 src/**
+.kin/**
 .gitignore
 tsconfig.json
+kin-*.vsix
 node_modules/**
 **/*.map
 **/*.ts

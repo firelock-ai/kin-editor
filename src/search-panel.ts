@@ -4,14 +4,20 @@
 import * as vscode from "vscode";
 import { KinClient, KinEntity } from "./kin-client";
 import { join } from "path";
+import {
+  describeError,
+  formatSearchResultDescription,
+  formatSearchResultDetail,
+  formatSearchResultLabel,
+} from "./accessibility";
 
 export async function showSearchQuickPick(
   client: KinClient,
   workspacePath: string
 ): Promise<void> {
   const query = await vscode.window.showInputBox({
-    prompt: "Search Kin entities",
-    placeHolder: "Function name, class, module...",
+    prompt: "Search Kin entities by name",
+    placeHolder: "Function name, class, module, or symbol",
   });
 
   if (!query) {
@@ -22,24 +28,26 @@ export async function showSearchQuickPick(
   try {
     results = await client.search(query);
   } catch (err) {
-    vscode.window.showErrorMessage(`Kin search failed: ${err}`);
+    vscode.window.showErrorMessage(`Kin Search failed: ${describeError(err)}`);
     return;
   }
 
   if (results.length === 0) {
-    vscode.window.showInformationMessage(`No entities found for "${query}"`);
+    vscode.window.showInformationMessage(
+      `Kin Search: no entities found for "${query}".`
+    );
     return;
   }
 
   const items = results.map((e) => ({
-    label: `$(symbol-${kindIcon(e.kind)}) ${e.name}`,
-    description: `${e.file}:${e.line}`,
-    detail: e.signature || e.kind,
+    label: formatSearchResultLabel(e),
+    description: formatSearchResultDescription(e),
+    detail: formatSearchResultDetail(e),
     entity: e,
   }));
 
   const selected = await vscode.window.showQuickPick(items, {
-    placeHolder: `${results.length} result(s) for "${query}"`,
+    placeHolder: `${results.length} result${results.length === 1 ? "" : "s"} for "${query}"`,
     matchOnDescription: true,
     matchOnDetail: true,
   });
@@ -66,8 +74,8 @@ export async function showTraceQuickPick(
     : undefined;
 
   const entity = await vscode.window.showInputBox({
-    prompt: "Trace entity through the graph",
-    placeHolder: "Entity name",
+    prompt: "Trace an entity through the Kin graph",
+    placeHolder: "Entity name or symbol",
     value: word || "",
   });
 
@@ -79,24 +87,26 @@ export async function showTraceQuickPick(
   try {
     results = await client.trace(entity);
   } catch (err) {
-    vscode.window.showErrorMessage(`Kin trace failed: ${err}`);
+    vscode.window.showErrorMessage(`Kin Trace failed: ${describeError(err)}`);
     return;
   }
 
   if (results.length === 0) {
-    vscode.window.showInformationMessage(`No trace results for "${entity}"`);
+    vscode.window.showInformationMessage(
+      `Kin Trace: no related entities found for "${entity}".`
+    );
     return;
   }
 
   const items = results.map((e) => ({
-    label: `$(symbol-${kindIcon(e.kind)}) ${e.name}`,
-    description: `${e.file}:${e.line}`,
-    detail: e.signature || e.kind,
+    label: formatSearchResultLabel(e),
+    description: formatSearchResultDescription(e),
+    detail: formatSearchResultDetail(e),
     entity: e,
   }));
 
   const selected = await vscode.window.showQuickPick(items, {
-    placeHolder: `Trace: ${results.length} related entity(ies)`,
+    placeHolder: `Trace results for "${entity}"`,
   });
 
   if (selected) {
@@ -107,19 +117,4 @@ export async function showTraceQuickPick(
       selection: new vscode.Range(line, 0, line, 0),
     });
   }
-}
-
-function kindIcon(kind: string): string {
-  const map: Record<string, string> = {
-    Function: "function",
-    Class: "class",
-    Module: "module",
-    Method: "method",
-    Interface: "interface",
-    Struct: "struct",
-    Enum: "enum",
-    Variable: "variable",
-    Constant: "constant",
-  };
-  return map[kind] || "misc";
 }

@@ -3,6 +3,7 @@
 
 import * as vscode from "vscode";
 import { KinClient } from "./kin-client";
+import { formatStatusBarText, formatStatusBarTooltip } from "./accessibility";
 
 export class KinStatusBar {
   private item: vscode.StatusBarItem;
@@ -13,8 +14,12 @@ export class KinStatusBar {
       vscode.StatusBarAlignment.Left,
       50
     );
-    this.item.command = "kin.overview";
-    this.item.tooltip = "Click for Kin graph overview";
+    this.item.name = "Kin status";
+    this.item.command = {
+      command: "kin.overview",
+      title: "Open Kin graph overview",
+    };
+    this.item.tooltip = "Kin status. Loading workspace state...";
     this.item.show();
 
     // Update on file save
@@ -28,13 +33,12 @@ export class KinStatusBar {
   async update(): Promise<void> {
     try {
       const status = await this.client.status();
-      if (status.initialized) {
-        this.item.text = `$(graph) Kin: ${status.entityCount} entities`;
-      } else {
-        this.item.text = "$(graph) Kin: not initialized";
-      }
+      this.item.text = formatStatusBarText(status);
+      this.item.tooltip = formatStatusBarTooltip(status);
     } catch {
       this.item.text = "$(graph) Kin: unavailable";
+      this.item.tooltip =
+        "Kin status. This workspace is temporarily unavailable. Click to open the overview.";
     }
   }
 

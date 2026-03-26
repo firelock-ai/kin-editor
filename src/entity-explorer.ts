@@ -4,6 +4,15 @@
 import * as vscode from "vscode";
 import { KinClient, KinEntity } from "./kin-client";
 import { join } from "path";
+import { logError } from "./logger";
+import {
+  formatEntityAccessibilityLabel,
+  formatEntityDescription,
+  formatEntityTooltip,
+  formatKindGroupAccessibilityLabel,
+  formatKindGroupLabel,
+  formatKindGroupTooltip,
+} from "./accessibility";
 
 type ExplorerNode = KindGroupNode | EntityNode;
 
@@ -26,8 +35,12 @@ export class EntityExplorerProvider
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  private entities: KinEntity[] = [];
-  private grouped: Map<string, KinEntity[]> = new Map();
+  /** Kind counts from the initial overview load (cheap). */
+  private kindCounts: Map<string, number> = new Map();
+  /** Cached full entity list used to slice kind groups deterministically. */
+  private allEntities: KinEntity[] | undefined;
+  /** Per-kind entity cache — populated lazily on expand. */
+  private kindEntities: Map<string, KinEntity[]> = new Map();
 
   constructor(
     private client: KinClient,
@@ -35,19 +48,25 @@ export class EntityExplorerProvider
   ) {}
 
   refresh(): void {
-    this.entities = [];
-    this.grouped.clear();
+    this.kindCounts.clear();
+    this.allEntities = undefined;
+    this.kindEntities.clear();
     this._onDidChangeTreeData.fire();
   }
 
   getTreeItem(element: ExplorerNode): vscode.TreeItem {
     if (element.type === "kind") {
       const item = new vscode.TreeItem(
-        `${element.kind} (${element.count})`,
+        formatKindGroupLabel(element.kind, element.count),
         vscode.TreeItemCollapsibleState.Collapsed
       );
       item.contextValue = "kindGroup";
       item.iconPath = new vscode.ThemeIcon("symbol-class");
+      item.tooltip = formatKindGroupTooltip(element.kind, element.count);
+      item.accessibilityInformation = {
+        label: formatKindGroupAccessibilityLabel(element.kind, element.count),
+        role: "treeitem",
+      };
       return item;
     }
 
@@ -56,13 +75,18 @@ export class EntityExplorerProvider
       e.name,
       vscode.TreeItemCollapsibleState.None
     );
-    item.description = `${e.file}:${e.line}`;
-    item.tooltip = e.signature || `${e.kind} ${e.name}`;
+    item.description = formatEntityDescription(e);
+    item.tooltip = formatEntityTooltip(e);
     item.contextValue = "entity";
     item.iconPath = iconForKind(e.kind);
+    item.resourceUri = vscode.Uri.file(join(this.workspacePath, e.file));
+    item.accessibilityInformation = {
+      label: formatEntityAccessibilityLabel(e),
+      role: "treeitem",
+    };
     item.command = {
       command: "vscode.open",
-      title: "Open Entity",
+      title: "Open Kin Entity",
       arguments: [
         vscode.Uri.file(join(this.workspacePath, e.file)),
         { selection: new vscode.Range(e.line - 1, 0, e.line - 1, 0) },
@@ -76,31 +100,30 @@ export class EntityExplorerProvider
       return this.getKindGroups();
     }
     if (element.type === "kind") {
-      const entities = this.grouped.get(element.kind) || [];
-      return entities.map((entity) => ({ type: "entity" as const, entity }));
+      return this.getEntitiesForKind(element.kind);
     }
     return [];
   }
 
+  /**
+   * Load only the kind counts via overview (lightweight).
+   * Entities are fetched per-kind on tree node expand.
+   */
   private async getKindGroups(): Promise<ExplorerNode[]> {
-    try {
-      this.entities = await this.client.entities();
-    } catch {
-      this.entities = [];
-    }
-
-    this.grouped.clear();
-    for (const entity of this.entities) {
-      const kind = entity.kind || "Unknown";
-      if (!this.grouped.has(kind)) {
-        this.grouped.set(kind, []);
+    if (this.kindCounts.size === 0) {
+      try {
+        const overview = await this.client.overview();
+        for (const [kind, count] of Object.entries(overview.kinds)) {
+          this.kindCounts.set(kind, count);
+        }
+      } catch (err) {
+        logError("Failed to load entity overview", err);
       }
-      this.grouped.get(kind)!.push(entity);
     }
 
     const groups: ExplorerNode[] = [];
-    for (const [kind, entities] of this.grouped) {
-      groups.push({ type: "kind", kind, count: entities.length });
+    for (const [kind, count] of this.kindCounts) {
+      groups.push({ type: "kind", kind, count });
     }
     return groups.sort((a, b) => {
       if (a.type === "kind" && b.type === "kind") {
@@ -108,6 +131,27 @@ export class EntityExplorerProvider
       }
       return 0;
     });
+  }
+
+  /**
+   * Lazily load entities for a specific kind on tree expand.
+   * Results are cached until the next refresh().
+   */
+  private async getEntitiesForKind(kind: string): Promise<ExplorerNode[]> {
+    let entities = this.kindEntities.get(kind);
+    if (!entities) {
+      try {
+        if (!this.allEntities) {
+          this.allEntities = await this.client.entities();
+        }
+        entities = this.allEntities.filter((e) => (e.kind || "Unknown") === kind);
+        this.kindEntities.set(kind, entities);
+      } catch (err) {
+        logError(`Failed to load entities for kind: ${kind}`, err);
+        entities = [];
+      }
+    }
+    return entities.map((entity) => ({ type: "entity" as const, entity }));
   }
 }
 
