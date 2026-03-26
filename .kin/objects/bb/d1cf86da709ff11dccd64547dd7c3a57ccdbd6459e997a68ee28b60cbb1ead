@@ -1,0 +1,4 @@
+import { KinClient } from "./kin-client";
+export declare function showSearchQuickPick(client: KinClient, workspacePath: string): Promise<void>;
+export declare function showTraceQuickPick(client: KinClient, workspacePath: string): Promise<void>;
+//# sourceMappingURL=search-panel.d.ts.map

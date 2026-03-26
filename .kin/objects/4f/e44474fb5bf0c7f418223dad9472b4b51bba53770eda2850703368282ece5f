@@ -1,0 +1,10 @@
+import { KinClient } from "./kin-client";
+export declare class KinStatusBar {
+    private client;
+    private item;
+    private disposables;
+    constructor(client: KinClient);
+    update(): Promise<void>;
+    dispose(): void;
+}
+//# sourceMappingURL=status-bar.d.ts.map
