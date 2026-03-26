@@ -1,1 +1,0 @@
-{"version":3,"file":"status-bar.d.ts","sourceRoot":"","sources":["../src/status-bar.ts"],"names":[],"mappings":"AAIA,OAAO,EAAE,SAAS,EAAE,MAAM,cAAc,CAAC;AAEzC,qBAAa,YAAY;IAIX,OAAO,CAAC,MAAM;IAH1B,OAAO,CAAC,IAAI,CAAuB;IACnC,OAAO,CAAC,WAAW,CAA2B;gBAE1B,MAAM,EAAE,SAAS;IAiB/B,MAAM,IAAI,OAAO,CAAC,IAAI,CAAC;IAa7B,OAAO,IAAI,IAAI;CAMhB"}
