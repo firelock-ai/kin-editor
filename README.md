@@ -1,14 +1,19 @@
 # Kin - Semantic VCS for VS Code
 
-Semantic code intelligence powered by [Kin](https://github.com/nicholasgasior/kin-ecosystem/tree/main/kin)'s graph engine.
+Semantic code intelligence powered by [Kin](https://github.com/firelock-ai/kin-editor)'s graph engine.
 
 ## Features
 
 - **Entity Explorer** -- Browse functions, classes, modules, and other entities in a sidebar tree view grouped by kind.
-- **Semantic Search** -- Ctrl+Shift+P > "Kin: Semantic Search" to find entities by name with quick navigation to source.
-- **Entity Trace** -- Right-click in the editor to trace an entity through the dependency graph.
-- **Status Bar** -- Live entity count in the bottom bar. Click for a graph overview.
-- **Graph Overview** -- See entity counts, edge counts, and kind breakdowns at a glance.
+- **Semantic Search** -- `Cmd+Shift+K S` to find entities by name with quick navigation to source.
+- **Entity Trace** -- Right-click in the editor or `Cmd+Shift+K T` to trace an entity through the dependency graph.
+- **Hover Info** -- Hover over any symbol to see its entity kind, file, and signature from the graph.
+- **Go to Definition** -- `F12` / `Ctrl+Click` resolves definitions through the Kin graph.
+- **Workspace Symbols** -- `Cmd+T` / `Ctrl+T` searches entities via the graph-backed symbol provider.
+- **Semantic Review** -- `Cmd+Shift+K V` to run entity-level code review with gutter decorations and diagnostics.
+- **Semantic Rename** -- `F2` on any entity for graph-aware rename across all references.
+- **Status Bar** -- Live entity count and connection mode (MCP/CLI) in the bottom bar. Click for a graph overview.
+- **Graph Overview** -- `Cmd+Shift+K O` to see entity counts, edge counts, and kind breakdowns at a glance.
 
 ## Accessibility
 
@@ -40,34 +45,35 @@ Or for development: open this folder in VS Code and press F5 to launch the Exten
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `kin.binaryPath` | `""` | Path to the kin binary. Empty = auto-detect. |
+| `kin.binaryPath` | `""` | Path to the kin binary. Empty = auto-detect (`~/.kin/bin/kin` or PATH). |
 | `kin.autoStart` | `true` | Auto-activate when `.kin/` exists in workspace. |
+| `kin.mcpEnabled` | `true` | Use a persistent MCP connection for zero-overhead graph queries. Disable to fall back to CLI subprocess per command. |
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `Kin: Semantic Search` | Search entities by name |
-| `Kin: Graph Overview` | Show graph statistics |
-| `Kin: Trace Entity` | Trace entity through the graph |
-| `Kin: Initialize Repository` | Run `kin init` |
-| `Kin: Show Status` | Show Kin status |
-| `Kin: Refresh Entity Explorer` | Re-index the entity tree |
+| Command | Keybinding | Description |
+|---------|------------|-------------|
+| `Kin: Semantic Search` | `Cmd+Shift+K S` | Search entities by name |
+| `Kin: Graph Overview` | `Cmd+Shift+K O` | Show graph statistics |
+| `Kin: Trace Entity` | `Cmd+Shift+K T` | Trace entity through the graph |
+| `Kin: Review Current File` | `Cmd+Shift+K V` | Semantic code review with gutter decorations |
+| `Kin: Refresh Entity Explorer` | `Cmd+Shift+K R` | Re-index the entity tree |
+| `Kin: Initialize Repository` | -- | Run `kin init` in the workspace |
+| `Kin: Show Status` | -- | Show entity count and connection mode |
 
-<!-- TODO: screenshots -->
+On Linux/Windows, replace `Cmd` with `Ctrl`.
 
 ## Architecture
 
-The extension currently communicates with Kin via CLI subprocess calls (`execFile`).
-Each command spawns a new process with 5-50ms overhead.
+The extension uses an MCP-first architecture with CLI fallback. On activation, it spawns a persistent MCP connection to `kin mcp start` over stdio (JSON-RPC 2.0 with Content-Length framing). All graph queries -- search, trace, overview, status, review -- route through MCP for zero-overhead access to the in-memory graph. If the MCP connection is unavailable, each query transparently falls back to a CLI subprocess call (`execFile`).
 
-### Future: MCP Connection
-A persistent MCP connection to the daemon would enable:
-- Real-time entity change notifications
-- Sub-millisecond query responses
-- Live hover/definition updates without subprocess overhead
+Key components:
+- **McpClient** (`mcp-client.ts`) -- Manages the MCP process lifecycle, auto-reconnects on crash, and handles the initialize handshake.
+- **KinClient** (`kin-client.ts`) -- Unified query interface that tries MCP first, then falls back to CLI. All commands consume this.
+- **WorkspaceManager** (`workspace-manager.ts`) -- Multi-root workspace support with per-folder MCP connections.
+- **Language Providers** -- HoverProvider, DefinitionProvider, WorkspaceSymbolProvider, and RenameProvider hook into VS Code's native APIs backed by the Kin graph.
 
-This is tracked as a post-launch optimization. The CLI approach is correct and sufficient for current usage patterns.
+The `kin.mcpEnabled` setting controls whether MCP is used. When disabled, all queries go through CLI subprocesses (5-50ms overhead per command).
 
 ## License
 
