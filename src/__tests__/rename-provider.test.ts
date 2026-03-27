@@ -99,7 +99,8 @@ describe("KinRenameProvider", () => {
       "oldName",
       "newName",
       "/workspace/src/demo.ts",
-      3
+      3,
+      13
     );
     expect(edit).toBeInstanceOf(vscode.WorkspaceEdit);
     expect((edit as any).edits).toEqual([

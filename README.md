@@ -56,6 +56,19 @@ Or for development: open this folder in VS Code and press F5 to launch the Exten
 
 <!-- TODO: screenshots -->
 
+## Architecture
+
+The extension currently communicates with Kin via CLI subprocess calls (`execFile`).
+Each command spawns a new process with 5-50ms overhead.
+
+### Future: MCP Connection
+A persistent MCP connection to the daemon would enable:
+- Real-time entity change notifications
+- Sub-millisecond query responses
+- Live hover/definition updates without subprocess overhead
+
+This is tracked as a post-launch optimization. The CLI approach is correct and sufficient for current usage patterns.
+
 ## License
 
 Apache-2.0. Copyright 2026 Firelock LLC.

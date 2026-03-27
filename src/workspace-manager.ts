@@ -3,27 +3,44 @@
 
 import * as vscode from "vscode";
 import { existsSync } from "fs";
-import { join, basename } from "path";
+import { join } from "path";
 import { KinClient } from "./kin-client";
+import { McpClient } from "./mcp-client";
 import { log } from "./logger";
 
 export interface WorkspaceEntry {
   folder: vscode.WorkspaceFolder;
   client: KinClient;
+  mcpClient: McpClient | null;
 }
 
-export class WorkspaceManager {
+export class WorkspaceManager implements vscode.Disposable {
   private entries: Map<string, WorkspaceEntry> = new Map();
 
-  constructor(folders: readonly vscode.WorkspaceFolder[]) {
+  constructor(folders: readonly vscode.WorkspaceFolder[], mcpEnabled: boolean) {
     for (const folder of folders) {
       const kinDir = join(folder.uri.fsPath, ".kin");
       if (existsSync(kinDir)) {
-        const client = new KinClient(folder.uri.fsPath);
-        this.entries.set(folder.uri.fsPath, { folder, client });
-        log(`Kin-enabled workspace folder: ${folder.name}`);
+        let mcpClient: McpClient | null = null;
+        if (mcpEnabled) {
+          mcpClient = new McpClient(folder.uri.fsPath);
+        }
+        const client = new KinClient(folder.uri.fsPath, mcpClient ?? undefined);
+        this.entries.set(folder.uri.fsPath, { folder, client, mcpClient });
+        log(`Kin-enabled workspace folder: ${folder.name} (mcp: ${mcpEnabled ? "enabled" : "disabled"})`);
       }
     }
+  }
+
+  /** Connect all MCP clients. Call after construction. */
+  async connectAll(): Promise<void> {
+    const promises: Promise<void>[] = [];
+    for (const entry of this.entries.values()) {
+      if (entry.mcpClient) {
+        promises.push(entry.mcpClient.connect());
+      }
+    }
+    await Promise.allSettled(promises);
   }
 
   get size(): number {
@@ -89,9 +106,6 @@ export class WorkspaceManager {
     return undefined;
   }
 
-  /**
-   * Returns the first available client (for status bar / fallback).
-   */
   primaryClient(): KinClient | undefined {
     const first = this.entries.values().next().value;
     return first?.client;
@@ -100,5 +114,14 @@ export class WorkspaceManager {
   primaryWorkspacePath(): string | undefined {
     const first = this.entries.values().next().value;
     return first?.folder.uri.fsPath;
+  }
+
+  dispose(): void {
+    for (const entry of this.entries.values()) {
+      if (entry.mcpClient) {
+        entry.mcpClient.dispose();
+      }
+    }
+    this.entries.clear();
   }
 }

@@ -3,14 +3,12 @@
 
 import * as vscode from "vscode";
 import { KinClient, KinEntity } from "../kin-client";
+import { WorkspaceManager } from "../workspace-manager";
 import { logError } from "../logger";
 import { join } from "path";
 
 export class KinDefinitionProvider implements vscode.DefinitionProvider {
-  constructor(
-    private client: KinClient,
-    private workspacePath: string
-  ) {}
+  constructor(private manager: WorkspaceManager) {}
 
   async provideDefinition(
     document: vscode.TextDocument,
@@ -27,9 +25,15 @@ export class KinDefinitionProvider implements vscode.DefinitionProvider {
       return undefined;
     }
 
+    const client = this.manager.getClientForPath(document.uri.fsPath);
+    if (!client) {
+      return undefined;
+    }
+    const workspacePath = client.getWorkspacePath();
+
     let results: KinEntity[];
     try {
-      results = await this.client.traceQuick(word);
+      results = await client.traceQuick(word);
     } catch {
       return undefined;
     }
@@ -46,16 +50,16 @@ export class KinDefinitionProvider implements vscode.DefinitionProvider {
 
     // Single result — jump directly
     if (candidates.length === 1) {
-      return this.toLocation(candidates[0]);
+      return toLocation(candidates[0], workspacePath);
     }
 
     // Multiple results — return all and let VS Code show peek
-    return candidates.map((e) => this.toLocation(e));
+    return candidates.map((e) => toLocation(e, workspacePath));
   }
+}
 
-  private toLocation(entity: KinEntity): vscode.Location {
-    const uri = vscode.Uri.file(join(this.workspacePath, entity.file));
-    const line = Math.max(0, entity.line - 1);
-    return new vscode.Location(uri, new vscode.Position(line, 0));
-  }
+function toLocation(entity: KinEntity, workspacePath: string): vscode.Location {
+  const uri = vscode.Uri.file(join(workspacePath, entity.file));
+  const line = Math.max(0, entity.line - 1);
+  return new vscode.Location(uri, new vscode.Position(line, 0));
 }
