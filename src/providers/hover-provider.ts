@@ -3,15 +3,40 @@
 
 import * as vscode from "vscode";
 import { KinClient, KinEntity } from "../kin-client";
+import { WorkspaceManager } from "../workspace-manager";
 import { logError } from "../logger";
 
-export class KinHoverProvider implements vscode.HoverProvider {
-  constructor(private client: KinClient) {}
+const HOVER_DEBOUNCE_MS = 300;
 
-  async provideHover(
+export class KinHoverProvider implements vscode.HoverProvider {
+  private hoverTimeout: ReturnType<typeof setTimeout> | undefined;
+  private hoverResolve: ((value: vscode.Hover | undefined) => void) | undefined;
+
+  constructor(private manager: WorkspaceManager) {}
+
+  provideHover(
     document: vscode.TextDocument,
     position: vscode.Position,
     _token: vscode.CancellationToken
+  ): Promise<vscode.Hover | undefined> {
+    return new Promise((resolve) => {
+      if (this.hoverTimeout) {
+        clearTimeout(this.hoverTimeout);
+      }
+      if (this.hoverResolve) {
+        this.hoverResolve(undefined);
+      }
+      this.hoverResolve = resolve;
+      this.hoverTimeout = setTimeout(async () => {
+        const result = await this.doProvideHover(document, position);
+        resolve(result);
+      }, HOVER_DEBOUNCE_MS);
+    });
+  }
+
+  private async doProvideHover(
+    document: vscode.TextDocument,
+    position: vscode.Position,
   ): Promise<vscode.Hover | undefined> {
     const range = document.getWordRangeAtPosition(position);
     if (!range) {
@@ -23,9 +48,14 @@ export class KinHoverProvider implements vscode.HoverProvider {
       return undefined;
     }
 
+    const client = this.manager.getClientForPath(document.uri.fsPath);
+    if (!client) {
+      return undefined;
+    }
+
     let related: KinEntity[];
     try {
-      related = await this.client.traceQuick(word);
+      related = await client.traceQuick(word);
     } catch {
       // Timeout or binary issue — don't block the editor
       return undefined;

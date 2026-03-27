@@ -1,7 +1,7 @@
 {
-  "name": "kin",
-  "displayName": "Kin - Semantic VCS",
-  "description": "Semantic code intelligence powered by Kin's graph engine",
+  "name": "kin-editor",
+  "displayName": "Kin - Semantic Code Intelligence",
+  "description": "VS Code extension for Kin: entity explorer, semantic search, trace, review, and rename powered by the Kin graph engine.",
   "version": "0.1.0",
   "publisher": "firelock",
   "license": "Apache-2.0",
@@ -153,6 +153,11 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically activate Kin when a .kin/ directory is found in the workspace."
+        },
+        "kin.mcpEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use a persistent MCP connection to the Kin graph for zero-overhead queries. Disable to fall back to CLI subprocess per command."
         }
       }
     }

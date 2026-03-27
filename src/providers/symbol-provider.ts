@@ -3,6 +3,7 @@
 
 import * as vscode from "vscode";
 import { KinClient, KinEntity } from "../kin-client";
+import { WorkspaceManager } from "../workspace-manager";
 import { logError } from "../logger";
 import { join } from "path";
 
@@ -26,10 +27,7 @@ const KIND_MAP: Record<string, vscode.SymbolKind> = {
 export class KinWorkspaceSymbolProvider
   implements vscode.WorkspaceSymbolProvider
 {
-  constructor(
-    private client: KinClient,
-    private workspacePath: string
-  ) {}
+  constructor(private manager: WorkspaceManager) {}
 
   async provideWorkspaceSymbols(
     query: string,
@@ -39,27 +37,37 @@ export class KinWorkspaceSymbolProvider
       return [];
     }
 
-    let results: KinEntity[];
-    try {
-      results = await this.client.search(query);
-    } catch {
-      return [];
+    // Search across all workspace roots and merge results.
+    const allResults: vscode.SymbolInformation[] = [];
+    for (const entry of this.manager.allEntries()) {
+      try {
+        const results = await entry.client.search(query);
+        const workspacePath = entry.folder.uri.fsPath;
+        for (const e of results) {
+          allResults.push(toSymbolInformation(e, workspacePath));
+        }
+      } catch {
+        // Skip failed workspace roots
+      }
     }
 
-    return results.map((e) => this.toSymbolInformation(e));
+    return allResults;
   }
+}
 
-  private toSymbolInformation(entity: KinEntity): vscode.SymbolInformation {
-    const uri = vscode.Uri.file(join(this.workspacePath, entity.file));
-    const line = Math.max(0, entity.line - 1);
-    const location = new vscode.Location(uri, new vscode.Position(line, 0));
-    const kind = KIND_MAP[entity.kind] ?? vscode.SymbolKind.Variable;
+function toSymbolInformation(
+  entity: KinEntity,
+  workspacePath: string,
+): vscode.SymbolInformation {
+  const uri = vscode.Uri.file(join(workspacePath, entity.file));
+  const line = Math.max(0, entity.line - 1);
+  const location = new vscode.Location(uri, new vscode.Position(line, 0));
+  const kind = KIND_MAP[entity.kind] ?? vscode.SymbolKind.Variable;
 
-    return new vscode.SymbolInformation(
-      entity.name,
-      kind,
-      entity.file,
-      location
-    );
-  }
+  return new vscode.SymbolInformation(
+    entity.name,
+    kind,
+    entity.file,
+    location
+  );
 }

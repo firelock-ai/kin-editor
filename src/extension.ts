@@ -21,6 +21,7 @@ import {
 } from "./accessibility";
 
 let statusBar: KinStatusBar | undefined;
+let manager: WorkspaceManager | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   const folders = vscode.workspace.workspaceFolders;
@@ -33,11 +34,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
   log(`Activating Kin extension for ${folders.length} workspace folder(s)`);
 
-  const manager = new WorkspaceManager(folders);
+  const config = vscode.workspace.getConfiguration("kin");
+  const mcpEnabled = config.get<boolean>("mcpEnabled", true);
+
+  manager = new WorkspaceManager(folders, mcpEnabled);
+  context.subscriptions.push(manager);
 
   // If no kin-enabled folders, only register init command
   if (manager.size === 0) {
-    const config = vscode.workspace.getConfiguration("kin");
     const autoStart = config.get<boolean>("autoStart", true);
     if (autoStart) {
       context.subscriptions.push(
@@ -66,6 +70,16 @@ export function activate(context: vscode.ExtensionContext): void {
     return;
   }
 
+  // Connect MCP clients asynchronously — don't block activation
+  if (mcpEnabled) {
+    manager.connectAll().then(() => {
+      log("MCP connections established");
+      // Refresh UI now that MCP is live
+      explorerProvider.refresh();
+      statusBar?.update();
+    });
+  }
+
   // Use primary client for explorer and status bar
   const primaryClient = manager.primaryClient()!;
   const primaryPath = manager.primaryWorkspacePath()!;
@@ -81,13 +95,13 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(statusBar);
 
   // Hover provider — shows entity info on hover for all file types
-  const hoverProvider = new KinHoverProvider(primaryClient);
+  const hoverProvider = new KinHoverProvider(manager);
   context.subscriptions.push(
     vscode.languages.registerHoverProvider({ scheme: "file" }, hoverProvider)
   );
 
   // Definition provider — F12 / Ctrl+Click go-to-definition via kin trace
-  const definitionProvider = new KinDefinitionProvider(primaryClient, primaryPath);
+  const definitionProvider = new KinDefinitionProvider(manager);
   context.subscriptions.push(
     vscode.languages.registerDefinitionProvider(
       { scheme: "file" },
@@ -96,7 +110,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // Workspace symbol provider — Cmd+T / Ctrl+T symbol search via kin search
-  const symbolProvider = new KinWorkspaceSymbolProvider(primaryClient, primaryPath);
+  const symbolProvider = new KinWorkspaceSymbolProvider(manager);
   context.subscriptions.push(
     vscode.languages.registerWorkspaceSymbolProvider(symbolProvider)
   );
@@ -114,14 +128,14 @@ export function activate(context: vscode.ExtensionContext): void {
   // Commands — resolve active workspace for multi-root
   context.subscriptions.push(
     vscode.commands.registerCommand("kin.search", async () => {
-      const resolved = await manager.resolveActiveClient();
+      const resolved = await manager!.resolveActiveClient();
       if (resolved) {
         await showSearchQuickPick(resolved.client, resolved.workspacePath);
       }
     }),
 
     vscode.commands.registerCommand("kin.overview", async () => {
-      const resolved = await manager.resolveActiveClient();
+      const resolved = await manager!.resolveActiveClient();
       if (!resolved) return;
       try {
         const overview = await resolved.client.overview();
@@ -135,7 +149,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand("kin.trace", async () => {
-      const resolved = await manager.resolveActiveClient();
+      const resolved = await manager!.resolveActiveClient();
       if (resolved) {
         await showTraceQuickPick(resolved.client, resolved.workspacePath);
       }
@@ -162,13 +176,14 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand("kin.status", async () => {
-      const resolved = await manager.resolveActiveClient();
+      const resolved = await manager!.resolveActiveClient();
       if (!resolved) return;
       try {
         const status = await resolved.client.status();
         if (status.initialized) {
+          const mcpLabel = resolved.client.isMcpConnected() ? " (MCP)" : " (CLI)";
           vscode.window.showInformationMessage(
-            `Kin: ${status.entityCount} entities indexed; graph state: ${status.graphState}.`
+            `Kin${mcpLabel}: ${status.entityCount} entities indexed; graph state: ${status.graphState}.`
           );
         } else {
           vscode.window.showWarningMessage(
@@ -196,4 +211,6 @@ export function activate(context: vscode.ExtensionContext): void {
 export function deactivate(): void {
   statusBar?.dispose();
   statusBar = undefined;
+  manager?.dispose();
+  manager = undefined;
 }
