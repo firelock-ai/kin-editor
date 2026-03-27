@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
-import { existsSync } from "fs";
-import { join } from "path";
 import { KinClient } from "./kin-client";
 import { EntityExplorerProvider } from "./entity-explorer";
 import { KinStatusBar } from "./status-bar";
