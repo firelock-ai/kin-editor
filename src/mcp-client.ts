@@ -170,7 +170,7 @@ export class McpClient implements vscode.Disposable {
   }
 
   private rejectAllPending(reason: string): void {
-    for (const [id, pending] of this.pending) {
+    for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(new Error(reason));
     }
@@ -187,7 +187,7 @@ export class McpClient implements vscode.Disposable {
   }
 
   private drainBuffer(): void {
-    while (true) {
+    for (;;) {
       // Try Content-Length framing first
       const headerEnd = this.buffer.indexOf("\r\n\r\n");
       if (headerEnd !== -1) {

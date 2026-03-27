@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
-import { KinClient, KinEntity } from "../kin-client";
+import { KinEntity } from "../kin-client";
 import { WorkspaceManager } from "../workspace-manager";
-import { logError } from "../logger";
 
 const HOVER_DEBOUNCE_MS = 300;
 

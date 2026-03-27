@@ -4,7 +4,7 @@
 jest.mock(
   "vscode",
   () => {
-    class EventEmitter<T> {
+    class EventEmitter {
       event = jest.fn();
       fire = jest.fn();
       dispose = jest.fn();
