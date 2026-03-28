@@ -167,6 +167,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "package:vsix": "npx @vscode/vsce package",
     "lint": "eslint src --ext ts",
     "test": "jest --passWithNoTests"
   },

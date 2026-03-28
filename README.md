@@ -30,7 +30,7 @@ Semantic code intelligence powered by [Kin](https://github.com/firelock-ai/kin-e
 ## Installation
 
 1. Build the extension: `npm install && npm run compile`
-2. Package: `npx @vscode/vsce package`
+2. Package: `npm run package:vsix`
 3. Install the `.vsix` file in VS Code: Extensions > "..." > "Install from VSIX..."
 
 Or for development: open this folder in VS Code and press F5 to launch the Extension Development Host.
@@ -39,7 +39,8 @@ Or for development: open this folder in VS Code and press F5 to launch the Exten
 
 - VSIX install smoke verified on 2026-03-25 in VSCodium `1.112.01907`, Cursor `2.6.21`, and Windsurf `1.108.2`.
 - Each editor listed the installed extension as `firelock.kin@0.1.0` from the packaged VSIX.
-- Marketplace publication is still pending; for now the supported distribution path is manual VSIX install.
+- Tagged GitHub releases now attach a packaged VSIX for `alpha`, `beta` / `rc`, and stable lanes.
+- Visual Studio Marketplace publication is optional and runs only when `VSCE_TOKEN` is configured; until then, GitHub release assets remain the canonical install path.
 
 ## Configuration
 
