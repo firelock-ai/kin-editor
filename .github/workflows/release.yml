@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run compile
+      - run: npm run lint
+      - run: npm test
+
+  release:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Package VSIX
+        run: node ./scripts/package-vsix.mjs
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: kin-*.vsix
+      - name: Publish VSIX to Visual Studio Marketplace
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+          VSCE_TOKEN: ${{ secrets.VSCE_TOKEN }}
+        run: |
+          if [ -z "${VSCE_TOKEN:-}" ]; then
+            echo "VSCE_TOKEN is not configured; skipping Visual Studio Marketplace publish"
+            exit 0
+          fi
+
+          node --input-type=module <<'NODE'
+          import { publishVSIX } from "@vscode/vsce";
+
+          const version = process.env.RELEASE_VERSION.replace(/^v/, "");
+          const packagePath = `kin-${version}.vsix`;
+
+          await publishVSIX(packagePath, {
+            pat: process.env.VSCE_TOKEN,
+            preRelease: version.includes("-"),
+            skipDuplicate: true,
+          });
+
+          console.log(`Published ${packagePath} to Visual Studio Marketplace`);
+          NODE
