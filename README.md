@@ -1,6 +1,8 @@
 # Kin - Semantic VCS for VS Code
 
-Semantic code intelligence powered by [Kin](https://github.com/firelock-ai/kin-editor)'s graph engine.
+Semantic code intelligence powered by [Kin](https://github.com/firelock-ai/kin)'s graph engine.
+
+> **MCP-first with CLI fallback.** All graph queries route through a persistent MCP connection for zero-overhead access to the in-memory graph. If the MCP connection is unavailable, each query transparently falls back to a CLI subprocess call. The graph is the authority; the editor is a projection surface.
 
 ## Features
 
