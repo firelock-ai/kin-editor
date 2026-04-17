@@ -27,6 +27,9 @@ export class KinReviewProvider implements vscode.Disposable {
   private errorDecorationType: vscode.TextEditorDecorationType;
   private infoDecorationType: vscode.TextEditorDecorationType;
   private diagnosticCollection: vscode.DiagnosticCollection;
+  private lastReviewedPath: string | undefined;
+  private lastAppliedEditor: vscode.TextEditor | undefined;
+  private lastFindings: ReviewFinding[] | undefined;
 
   constructor(private client: KinClient) {
     this.outputChannel = vscode.window.createOutputChannel("Kin Review");
@@ -105,7 +108,7 @@ export class KinReviewProvider implements vscode.Disposable {
     if (result.findings.length === 0) {
       this.outputChannel.appendLine("No findings detected.");
       vscode.window.showInformationMessage("Kin Review: no findings.");
-      this.clearDecorations();
+      this.clearReviewState();
       return;
     }
 
@@ -156,7 +159,22 @@ export class KinReviewProvider implements vscode.Disposable {
     editor: vscode.TextEditor,
     findings: ReviewFinding[]
   ): void {
-    this.clearDecorations(editor);
+    if (this.lastAppliedEditor && this.lastAppliedEditor !== editor) {
+      this.clearEditorDecorations(this.lastAppliedEditor);
+    }
+
+    this.lastReviewedPath = editor.document.uri.fsPath;
+    this.lastAppliedEditor = editor;
+    this.lastFindings = findings;
+
+    this.renderDecorations(editor, findings);
+  }
+
+  private renderDecorations(
+    editor: vscode.TextEditor,
+    findings: ReviewFinding[]
+  ): void {
+    this.clearEditorDecorations(editor);
 
     const warnings: vscode.DecorationOptions[] = [];
     const errors: vscode.DecorationOptions[] = [];
@@ -192,6 +210,27 @@ export class KinReviewProvider implements vscode.Disposable {
     editor.setDecorations(this.infoDecorationType, infos);
   }
 
+  onActiveEditorChanged(editor: vscode.TextEditor | undefined): void {
+    if (!this.lastReviewedPath || !this.lastFindings) {
+      return;
+    }
+
+    const activePath = editor?.document.uri.fsPath;
+    if (editor && activePath === this.lastReviewedPath) {
+      if (this.lastAppliedEditor && this.lastAppliedEditor !== editor) {
+        this.clearEditorDecorations(this.lastAppliedEditor);
+      }
+      this.lastAppliedEditor = editor;
+      this.renderDecorations(editor, this.lastFindings);
+      return;
+    }
+
+    if (this.lastAppliedEditor) {
+      this.clearEditorDecorations(this.lastAppliedEditor);
+      this.lastAppliedEditor = undefined;
+    }
+  }
+
   private publishDiagnostics(
     filePath: string,
     findings: ReviewFinding[]
@@ -216,13 +255,20 @@ export class KinReviewProvider implements vscode.Disposable {
     this.diagnosticCollection.set(uri, diagnostics);
   }
 
-  private clearDecorations(editor?: vscode.TextEditor): void {
+  private clearEditorDecorations(editor?: vscode.TextEditor): void {
     const target = editor ?? vscode.window.activeTextEditor;
     if (target) {
       target.setDecorations(this.warningDecorationType, []);
       target.setDecorations(this.errorDecorationType, []);
       target.setDecorations(this.infoDecorationType, []);
     }
+  }
+
+  private clearReviewState(): void {
+    this.clearEditorDecorations(this.lastAppliedEditor);
+    this.lastAppliedEditor = undefined;
+    this.lastReviewedPath = undefined;
+    this.lastFindings = undefined;
     this.diagnosticCollection.clear();
   }
 

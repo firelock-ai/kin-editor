@@ -16,20 +16,66 @@ export interface WorkspaceEntry {
 
 export class WorkspaceManager implements vscode.Disposable {
   private entries: Map<string, WorkspaceEntry> = new Map();
+  private readonly mcpEnabled: boolean;
 
   constructor(folders: readonly vscode.WorkspaceFolder[], mcpEnabled: boolean) {
+    this.mcpEnabled = mcpEnabled;
     for (const folder of folders) {
       const kinDir = join(folder.uri.fsPath, ".kin");
       if (existsSync(kinDir)) {
-        let mcpClient: McpClient | null = null;
-        if (mcpEnabled) {
-          mcpClient = new McpClient(folder.uri.fsPath);
-        }
+        const mcpClient = this.mcpEnabled ? new McpClient(folder.uri.fsPath) : null;
         const client = new KinClient(folder.uri.fsPath, mcpClient ?? undefined);
         this.entries.set(folder.uri.fsPath, { folder, client, mcpClient });
         log(`Kin-enabled workspace folder: ${folder.name} (mcp: ${mcpEnabled ? "enabled" : "disabled"})`);
       }
     }
+  }
+
+  /**
+   * Refresh the set of Kin-enabled workspace folders from the current VS Code
+   * workspace state. Returns true when the active Kin folder set changed.
+   */
+  syncWorkspaceFolders(folders: readonly vscode.WorkspaceFolder[]): boolean {
+    const nextEntries = new Map<string, WorkspaceEntry>();
+    let changed = false;
+
+    for (const folder of folders) {
+      const folderPath = folder.uri.fsPath;
+      const kinDir = join(folderPath, ".kin");
+      const existing = this.entries.get(folderPath);
+
+      if (!existsSync(kinDir)) {
+        if (existing) {
+          existing.mcpClient?.dispose();
+          changed = true;
+        }
+        continue;
+      }
+
+      if (existing) {
+        nextEntries.set(folderPath, {
+          ...existing,
+          folder,
+        });
+        continue;
+      }
+
+      const mcpClient = this.mcpEnabled ? new McpClient(folderPath) : null;
+      const client = new KinClient(folderPath, mcpClient ?? undefined);
+      nextEntries.set(folderPath, { folder, client, mcpClient });
+      changed = true;
+      log(`Kin-enabled workspace folder: ${folder.name} (mcp: ${this.mcpEnabled ? "enabled" : "disabled"})`);
+    }
+
+    for (const [folderPath, entry] of this.entries.entries()) {
+      if (!nextEntries.has(folderPath)) {
+        entry.mcpClient?.dispose();
+        changed = true;
+      }
+    }
+
+    this.entries = nextEntries;
+    return changed;
   }
 
   /** Connect all MCP clients. Call after construction. */
