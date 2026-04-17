@@ -123,6 +123,27 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.languages.registerRenameProvider({ scheme: "file" }, renameProvider)
   );
 
+  const refreshWorkspaceState = () => {
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    const changed = manager!.syncWorkspaceFolders(folders);
+    if (!changed) {
+      return;
+    }
+
+    explorerProvider.refresh();
+    statusBar?.update();
+    reviewProvider.onActiveEditorChanged(vscode.window.activeTextEditor);
+  };
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      refreshWorkspaceState();
+    }),
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      reviewProvider.onActiveEditorChanged(editor);
+    })
+  );
+
   // Commands — resolve active workspace for multi-root
   context.subscriptions.push(
     vscode.commands.registerCommand("kin.search", async () => {
