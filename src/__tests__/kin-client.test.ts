@@ -263,4 +263,130 @@ describe("KinClient", () => {
       });
     });
   });
+
+  describe("MCP contract handling", () => {
+    it("parses semantic_search results from MCP", async () => {
+      const mcp = {
+        isConnected: () => true,
+        callTool: jest.fn().mockResolvedValue(JSON.stringify({
+          results: [
+            {
+              kind: "Function",
+              name: "foo",
+              file_path: "src/foo.ts",
+              start_line: 12,
+              signature: "function foo()",
+            },
+          ],
+        })),
+      };
+
+      const client = new KinClient("/workspace", mcp as never);
+      const result = await client.search("foo");
+
+      expect(mcp.callTool).toHaveBeenCalledWith(
+        "semantic_search",
+        { query: "foo", limit: 50, compact: true },
+        15_000
+      );
+      expect(result).toEqual([
+        {
+          kind: "Function",
+          name: "foo",
+          file: "src/foo.ts",
+          line: 12,
+          signature: "function foo()",
+        },
+      ]);
+      expect(mockExecFile).not.toHaveBeenCalled();
+    });
+
+    it("loads entities through semantic_search instead of explore_codebase", async () => {
+      const mcp = {
+        isConnected: () => true,
+        callTool: jest.fn().mockResolvedValue(JSON.stringify({
+          results: [
+            { kind: "Class", name: "Widget", file_path: "src/widget.ts", start_line: 3 },
+          ],
+        })),
+      };
+
+      const client = new KinClient("/workspace", mcp as never);
+      await client.entities();
+
+      expect(mcp.callTool).toHaveBeenCalledWith(
+        "semantic_search",
+        { query: "", limit: 5000, compact: true },
+        30_000
+      );
+    });
+
+    it("calls find_references with query and parses references", async () => {
+      const mcp = {
+        isConnected: () => true,
+        callTool: jest.fn().mockResolvedValue(JSON.stringify({
+          references: [
+            {
+              kind: "Function",
+              name: "caller",
+              file_path: "src/caller.ts",
+              start_line: 7,
+            },
+          ],
+        })),
+      };
+
+      const client = new KinClient("/workspace", mcp as never);
+      const result = await client.trace("target");
+
+      expect(mcp.callTool).toHaveBeenCalledWith(
+        "find_references",
+        { query: "target" },
+        10_000
+      );
+      expect(result[0]).toMatchObject({
+        name: "caller",
+        file: "src/caller.ts",
+        line: 7,
+      });
+    });
+
+    it("maps structured MCP semantic_review comments to findings", async () => {
+      const mcp = {
+        isConnected: () => true,
+        callTool: jest.fn().mockResolvedValue(JSON.stringify({
+          summary: "Risk: Medium",
+          inline_comments: [
+            {
+              file: "src/demo.ts",
+              start_line: 4,
+              kind: "CoverageGap",
+              message: "New public entity has no test coverage",
+            },
+          ],
+        })),
+      };
+
+      const client = new KinClient("/workspace", mcp as never);
+      const result = await client.review("/workspace/src/demo.ts");
+
+      expect(mcp.callTool).toHaveBeenCalledWith(
+        "semantic_review",
+        { files: ["src/demo.ts"], include_traffic: false, format: "json" },
+        30_000
+      );
+      expect(result.findings).toEqual([
+        {
+          entity: "",
+          kind: "CoverageGap",
+          file: "src/demo.ts",
+          line: 4,
+          severity: "warning",
+          message: "New public entity has no test coverage",
+        },
+      ]);
+      expect(result.summary).toBe("Risk: Medium");
+      expect(mockExecFile).not.toHaveBeenCalled();
+    });
+  });
 });

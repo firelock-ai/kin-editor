@@ -57,6 +57,8 @@ export interface KinReviewResult {
   summary: string;
 }
 
+type UnknownRecord = Record<string, unknown>;
+
 export interface KinRenameRange {
   startLine?: number;
   startCharacter?: number;
@@ -228,7 +230,7 @@ export class KinClient {
       try {
         const raw = await this.mcpClient!.callTool(
           "semantic_search",
-          { query },
+          { query, limit: 50, compact: true },
           15_000,
         );
         return this.parseEntitiesFromMcp(raw);
@@ -247,13 +249,13 @@ export class KinClient {
     if (this.isMcpConnected()) {
       try {
         const raw = await this.mcpClient!.callTool(
-          "explore_codebase",
-          {},
+          "semantic_search",
+          { query: "", limit: 5000, compact: true },
           30_000,
         );
         return this.parseEntitiesFromMcp(raw);
       } catch (err) {
-        logError("MCP explore_codebase failed, falling back to CLI", err);
+        logError("MCP entity load failed, falling back to CLI", err);
       }
     }
     return this.runWithProgress(
@@ -288,7 +290,7 @@ export class KinClient {
       try {
         const raw = await this.mcpClient!.callTool(
           "find_references",
-          { entity_name: entity },
+          { query: entity },
           10_000,
         );
         return this.parseEntitiesFromMcp(raw);
@@ -308,7 +310,7 @@ export class KinClient {
       try {
         const raw = await this.mcpClient!.callTool(
           "find_references",
-          { entity_name: entity },
+          { query: entity },
           3_000,
         );
         return this.parseEntitiesFromMcp(raw);
@@ -350,10 +352,14 @@ export class KinClient {
       try {
         const raw = await this.mcpClient!.callTool(
           "semantic_review",
-          { files: [relativePath] },
+          { files: [relativePath], include_traffic: false, format: "json" },
           30_000,
         );
-        return this.parseReviewFromMcp(raw, relativePath);
+        const review = this.parseReviewFromMcp(raw, relativePath);
+        if (review) {
+          return review;
+        }
+        throw new Error("MCP semantic_review returned unstructured text");
       } catch (err) {
         logError("MCP semantic_review failed, falling back to CLI", err);
       }
@@ -416,12 +422,22 @@ export class KinClient {
       if (Array.isArray(parsed)) {
         return parsed.map(this.normalizeEntity);
       }
-      // Some tools return { entities: [...] }
-      if (parsed && Array.isArray(parsed.entities)) {
-        return parsed.entities.map(this.normalizeEntity);
+
+      if (!this.isRecord(parsed)) {
+        return [];
       }
-      // Single entity
-      if (parsed && typeof parsed.name === "string") {
+
+      for (const key of ["results", "entities", "references"]) {
+        const value = parsed[key];
+        if (Array.isArray(value)) {
+          return value.map(this.normalizeEntity).filter((entity) => entity.name || entity.file);
+        }
+      }
+
+      if (this.isRecord(parsed.focal_entity)) {
+        return [this.normalizeEntity(parsed.focal_entity)];
+      }
+      if (typeof parsed.name === "string") {
         return [this.normalizeEntity(parsed)];
       }
       return [];
@@ -431,12 +447,12 @@ export class KinClient {
     }
   }
 
-  private normalizeEntity(raw: Record<string, unknown>): KinEntity {
+  private normalizeEntity(raw: UnknownRecord): KinEntity {
     return {
       kind: String(raw.kind ?? raw.entity_kind ?? "Unknown"),
       name: String(raw.name ?? raw.entity_name ?? ""),
-      file: String(raw.file ?? raw.file_path ?? ""),
-      line: Number(raw.line ?? raw.start_line ?? 0),
+      file: String(raw.file ?? raw.file_path ?? raw.read_path ?? ""),
+      line: Number(raw.line ?? raw.start_line ?? 1),
       signature: raw.signature ? String(raw.signature) : undefined,
     };
   }
@@ -468,25 +484,108 @@ export class KinClient {
     }
   }
 
-  private parseReviewFromMcp(raw: string, filePath: string): KinReviewResult {
+  private parseReviewFromMcp(raw: string, filePath: string): KinReviewResult | undefined {
     try {
       const parsed = JSON.parse(raw);
-      if (parsed.findings && Array.isArray(parsed.findings)) {
+      if (!this.isRecord(parsed)) {
+        return undefined;
+      }
+
+      if (Array.isArray(parsed.findings)) {
         return {
-          file: parsed.file ?? filePath,
-          findings: parsed.findings,
-          summary: parsed.summary ?? "",
+          file: String(parsed.file ?? filePath),
+          findings: parsed.findings.map((finding) =>
+            this.normalizeReviewFinding(finding, filePath)
+          ),
+          summary: String(parsed.summary ?? ""),
         };
       }
-      // Wrap text-only response
-      return {
-        file: filePath,
-        findings: [],
-        summary: typeof parsed === "string" ? parsed : raw,
-      };
+
+      if (Array.isArray(parsed.inline_comments)) {
+        return {
+          file: filePath,
+          findings: parsed.inline_comments.map((comment) =>
+            this.normalizeInlineComment(comment, filePath)
+          ),
+          summary: this.reviewSummary(parsed),
+        };
+      }
+
+      if (typeof parsed.summary === "string") {
+        return {
+          file: filePath,
+          findings: [],
+          summary: parsed.summary,
+        };
+      }
+
+      return undefined;
     } catch {
-      return { file: filePath, findings: [], summary: raw };
+      return undefined;
     }
+  }
+
+  private normalizeReviewFinding(raw: unknown, fallbackFile: string): KinReviewFinding {
+    const finding = this.isRecord(raw) ? raw : {};
+    return {
+      entity: String(finding.entity ?? finding.name ?? ""),
+      kind: String(finding.kind ?? "Review"),
+      file: String(finding.file ?? fallbackFile),
+      line: Number(finding.line ?? finding.start_line ?? 1),
+      severity: this.normalizeSeverity(finding.severity),
+      message: String(finding.message ?? finding.title ?? ""),
+    };
+  }
+
+  private normalizeInlineComment(raw: unknown, fallbackFile: string): KinReviewFinding {
+    const comment = this.isRecord(raw) ? raw : {};
+    return {
+      entity: "",
+      kind: String(comment.kind ?? "Review"),
+      file: String(comment.file ?? fallbackFile),
+      line: Number(comment.start_line ?? comment.line ?? 1),
+      severity: this.inlineCommentSeverity(comment.kind),
+      message: String(comment.message ?? ""),
+    };
+  }
+
+  private normalizeSeverity(raw: unknown): KinReviewFinding["severity"] {
+    return raw === "error" || raw === "warning" || raw === "info"
+      ? raw
+      : "info";
+  }
+
+  private inlineCommentSeverity(kind: unknown): KinReviewFinding["severity"] {
+    switch (String(kind)) {
+      case "Breaking":
+      case "ContractViolation":
+        return "error";
+      case "CoverageGap":
+      case "SignatureChange":
+      case "VisibilityChange":
+      case "AgentUnreviewed":
+        return "warning";
+      default:
+        return "info";
+    }
+  }
+
+  private reviewSummary(parsed: UnknownRecord): string {
+    if (typeof parsed.summary === "string") {
+      return parsed.summary;
+    }
+    if (this.isRecord(parsed.risk)) {
+      const risk = parsed.risk;
+      const level = risk.overall_risk ?? risk.overallRisk;
+      if (level) {
+        return `Risk: ${String(level)}`;
+      }
+    }
+    return "";
+  }
+
+  private isRecord(value: unknown): value is UnknownRecord {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
   }
 
   private toRelativeWorkspacePath(filePath: string): string {

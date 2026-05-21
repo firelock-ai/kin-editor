@@ -116,6 +116,13 @@ export class EntityExplorerProvider
         for (const [kind, count] of Object.entries(overview.kinds)) {
           this.kindCounts.set(kind, count);
         }
+        if (this.kindCounts.size === 0 && overview.entities > 0) {
+          this.allEntities = await this.client.entities();
+          for (const entity of this.allEntities) {
+            const kind = entity.kind || "Unknown";
+            this.kindCounts.set(kind, (this.kindCounts.get(kind) ?? 0) + 1);
+          }
+        }
       } catch (err) {
         logError("Failed to load entity overview", err);
       }
