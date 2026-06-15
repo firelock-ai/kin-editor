@@ -4,7 +4,7 @@
 import * as vscode from "vscode";
 import { KinEntity } from "../kin-client";
 import { WorkspaceManager } from "../workspace-manager";
-import { join } from "path";
+import { isAbsolute, join } from "path";
 
 const KIND_MAP: Record<string, vscode.SymbolKind> = {
   Function: vscode.SymbolKind.Function,
@@ -40,7 +40,7 @@ export class KinWorkspaceSymbolProvider
     const allResults: vscode.SymbolInformation[] = [];
     for (const entry of this.manager.allEntries()) {
       try {
-        const results = await entry.client.search(query);
+        const results = await entry.client.symbolSearch(query);
         const workspacePath = entry.folder.uri.fsPath;
         for (const e of results) {
           allResults.push(toSymbolInformation(e, workspacePath));
@@ -58,7 +58,9 @@ function toSymbolInformation(
   entity: KinEntity,
   workspacePath: string,
 ): vscode.SymbolInformation {
-  const uri = vscode.Uri.file(join(workspacePath, entity.file));
+  const uri = vscode.Uri.file(
+    isAbsolute(entity.file) ? entity.file : join(workspacePath, entity.file)
+  );
   const line = Math.max(0, entity.line - 1);
   const location = new vscode.Location(uri, new vscode.Position(line, 0));
   const kind = KIND_MAP[entity.kind] ?? vscode.SymbolKind.Variable;

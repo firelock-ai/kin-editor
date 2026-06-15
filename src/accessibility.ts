@@ -58,15 +58,27 @@ export function formatStatusBarTooltip(status: KinStatus): string {
 }
 
 export function formatOverviewMessage(overview: KinOverview): string {
-  const kindSummary = Object.entries(overview.kinds)
-    .map(([kind, count]) => `${kind}(${count})`)
-    .join(", ");
-  return [
-    `Entities: ${overview.entities}`,
-    `Edges: ${overview.edges}`,
-    `Files: ${overview.files}`,
-    `Kinds: ${kindSummary || "none"}`,
-  ].join(" | ");
+  // The kin_graph_status MCP tool only guarantees entity_count; edge_count,
+  // file_count, and kinds are populated when the daemon reports them.  Omit
+  // fields that would show fabricated zeros so the UI stays honest.
+  const parts: string[] = [`Entities: ${overview.entities}`];
+
+  if (overview.edges > 0) {
+    parts.push(`Edges: ${overview.edges}`);
+  }
+  if (overview.files > 0) {
+    parts.push(`Files: ${overview.files}`);
+  }
+
+  const kindEntries = Object.entries(overview.kinds);
+  if (kindEntries.length > 0) {
+    const kindSummary = kindEntries
+      .map(([kind, count]) => `${kind}(${count})`)
+      .join(", ");
+    parts.push(`Kinds: ${kindSummary}`);
+  }
+
+  return parts.join(" | ");
 }
 
 export function describeError(err: unknown): string {

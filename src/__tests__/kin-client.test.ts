@@ -265,7 +265,7 @@ describe("KinClient", () => {
   });
 
   describe("MCP contract handling", () => {
-    it("parses semantic_search results from MCP", async () => {
+    it("parses semantic_locate results from MCP", async () => {
       const mcp = {
         isConnected: () => true,
         callTool: jest.fn().mockResolvedValue(JSON.stringify({
@@ -285,8 +285,8 @@ describe("KinClient", () => {
       const result = await client.search("foo");
 
       expect(mcp.callTool).toHaveBeenCalledWith(
-        "semantic_search",
-        { query: "foo", limit: 50, compact: true },
+        "semantic_locate",
+        { query: "foo", limit: 50, granularity: "entity" },
         15_000
       );
       expect(result).toEqual([

@@ -17,6 +17,14 @@ export interface WorkspaceEntry {
 export class WorkspaceManager implements vscode.Disposable {
   private entries: Map<string, WorkspaceEntry> = new Map();
   private readonly mcpEnabled: boolean;
+  private readonly mcpSubscriptions: vscode.Disposable[] = [];
+
+  /**
+   * Fires whenever any Kin workspace's daemon signals a graph change.
+   * Consumers (the entity explorer, status bar) should refresh on this event.
+   */
+  private readonly _onGraphChanged = new vscode.EventEmitter<void>();
+  readonly onGraphChanged: vscode.Event<void> = this._onGraphChanged.event;
 
   constructor(folders: readonly vscode.WorkspaceFolder[], mcpEnabled: boolean) {
     this.mcpEnabled = mcpEnabled;
@@ -84,6 +92,13 @@ export class WorkspaceManager implements vscode.Disposable {
     for (const entry of this.entries.values()) {
       if (entry.mcpClient) {
         promises.push(entry.mcpClient.connect());
+        // Bubble graph-change notifications up so the explorer auto-refreshes.
+        this.mcpSubscriptions.push(
+          entry.mcpClient.onGraphChanged(() => {
+            log(`WorkspaceManager: graph changed in ${entry.folder.name} — firing refresh`);
+            this._onGraphChanged.fire();
+          })
+        );
       }
     }
     await Promise.allSettled(promises);
@@ -163,6 +178,11 @@ export class WorkspaceManager implements vscode.Disposable {
   }
 
   dispose(): void {
+    for (const sub of this.mcpSubscriptions) {
+      sub.dispose();
+    }
+    this.mcpSubscriptions.length = 0;
+    this._onGraphChanged.dispose();
     for (const entry of this.entries.values()) {
       if (entry.mcpClient) {
         entry.mcpClient.dispose();

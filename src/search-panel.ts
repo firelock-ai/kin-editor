@@ -3,7 +3,7 @@
 
 import * as vscode from "vscode";
 import { KinClient, KinEntity } from "./kin-client";
-import { join } from "path";
+import { isAbsolute, join } from "path";
 import {
   describeError,
   formatSearchResultDescription,
@@ -11,13 +11,24 @@ import {
   formatSearchResultLabel,
 } from "./accessibility";
 
+/**
+ * Resolve an entity file path to an absolute URI.
+ * Guards against `path.join` silently discarding `workspacePath` when
+ * the engine returns an absolute path for entity.file.
+ */
+function resolveEntityUri(workspacePath: string, entityFile: string): vscode.Uri {
+  return vscode.Uri.file(
+    isAbsolute(entityFile) ? entityFile : join(workspacePath, entityFile)
+  );
+}
+
 export async function showSearchQuickPick(
   client: KinClient,
   workspacePath: string
 ): Promise<void> {
   const query = await vscode.window.showInputBox({
-    prompt: "Search Kin entities by name",
-    placeHolder: "Function name, class, module, or symbol",
+    prompt: "Semantic search (powered by the Kin graph — not substring matching)",
+    placeHolder: "Describe what you're looking for: e.g. 'retry logic', 'auth handler'",
   });
 
   if (!query) {
@@ -53,7 +64,7 @@ export async function showSearchQuickPick(
   });
 
   if (selected) {
-    const uri = vscode.Uri.file(join(workspacePath, selected.entity.file));
+    const uri = resolveEntityUri(workspacePath, selected.entity.file);
     const line = selected.entity.line - 1;
     const doc = await vscode.workspace.openTextDocument(uri);
     await vscode.window.showTextDocument(doc, {
@@ -110,7 +121,7 @@ export async function showTraceQuickPick(
   });
 
   if (selected) {
-    const uri = vscode.Uri.file(join(workspacePath, selected.entity.file));
+    const uri = resolveEntityUri(workspacePath, selected.entity.file);
     const line = selected.entity.line - 1;
     const doc = await vscode.workspace.openTextDocument(uri);
     await vscode.window.showTextDocument(doc, {

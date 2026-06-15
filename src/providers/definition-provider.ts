@@ -4,7 +4,7 @@
 import * as vscode from "vscode";
 import { KinEntity } from "../kin-client";
 import { WorkspaceManager } from "../workspace-manager";
-import { join } from "path";
+import { isAbsolute, join } from "path";
 
 export class KinDefinitionProvider implements vscode.DefinitionProvider {
   constructor(private manager: WorkspaceManager) {}
@@ -58,7 +58,9 @@ export class KinDefinitionProvider implements vscode.DefinitionProvider {
 }
 
 function toLocation(entity: KinEntity, workspacePath: string): vscode.Location {
-  const uri = vscode.Uri.file(join(workspacePath, entity.file));
+  const uri = vscode.Uri.file(
+    isAbsolute(entity.file) ? entity.file : join(workspacePath, entity.file)
+  );
   const line = Math.max(0, entity.line - 1);
   return new vscode.Location(uri, new vscode.Position(line, 0));
 }
