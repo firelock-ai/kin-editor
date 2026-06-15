@@ -225,7 +225,42 @@ export class KinClient {
   // MCP-first query methods
   // ---------------------------------------------------------------------------
 
+  /**
+   * Semantic search: routes to `semantic_locate` (vector / natural-language
+   * retrieval) when MCP is available, falling back to the CLI `kin search`
+   * command. Use this for the user-facing "Kin: Semantic Search" command.
+   *
+   * `semantic_search` (name-pattern substring) is used by
+   * `symbolSearch` below for the workspace symbol provider (Cmd+T), where
+   * VS Code expects name-filtering behaviour.
+   */
   async search(query: string): Promise<KinEntity[]> {
+    if (this.isMcpConnected()) {
+      try {
+        const raw = await this.mcpClient!.callTool(
+          "semantic_locate",
+          { query, limit: 50, granularity: "entity" },
+          15_000,
+        );
+        return this.parseEntitiesFromMcp(raw);
+      } catch (err) {
+        logError("MCP semantic_locate failed, falling back to CLI", err);
+      }
+    }
+    return this.runWithProgress(
+      "Kin: searching entities...",
+      () => this.runJson<KinEntity[]>(["search", query], 15_000),
+      15_000
+    );
+  }
+
+  /**
+   * Name-pattern search: routes to `semantic_search` (substring / name
+   * matching) when MCP is available.  Used by the workspace symbol provider
+   * (Cmd+T / Ctrl+T) where VS Code expects results filtered by the typed
+   * identifier prefix.
+   */
+  async symbolSearch(query: string): Promise<KinEntity[]> {
     if (this.isMcpConnected()) {
       try {
         const raw = await this.mcpClient!.callTool(
@@ -235,11 +270,11 @@ export class KinClient {
         );
         return this.parseEntitiesFromMcp(raw);
       } catch (err) {
-        logError("MCP search failed, falling back to CLI", err);
+        logError("MCP semantic_search failed, falling back to CLI", err);
       }
     }
     return this.runWithProgress(
-      "Kin: searching entities...",
+      "Kin: searching symbols...",
       () => this.runJson<KinEntity[]>(["search", query], 15_000),
       15_000
     );

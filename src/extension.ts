@@ -76,6 +76,15 @@ export function activate(context: vscode.ExtensionContext): void {
       explorerProvider.refresh();
       statusBar?.update();
     });
+
+    // Auto-refresh the explorer whenever the daemon re-indexes the graph.
+    context.subscriptions.push(
+      manager.onGraphChanged(() => {
+        log("Graph changed — auto-refreshing entity explorer");
+        explorerProvider.refresh();
+        statusBar?.update();
+      })
+    );
   }
 
   // Use primary client for explorer and status bar

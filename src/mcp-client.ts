@@ -8,6 +8,17 @@ import { join } from "path";
 import * as vscode from "vscode";
 import { log, logError } from "./logger";
 
+/**
+ * Notification method names sent by the kin daemon that signal a graph change.
+ * Any of these cause the graph-changed event to fire so the UI can refresh.
+ */
+const GRAPH_CHANGE_NOTIFICATIONS = new Set([
+  "kin/graphChanged",
+  "kin/indexingComplete",
+  "kin/reindexComplete",
+  "$/progress",  // Some servers emit progress notifications at the end of indexing
+]);
+
 /** JSON-RPC 2.0 request. */
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -38,6 +49,16 @@ interface PendingRequest {
 }
 
 /**
+ * JSON-RPC 2.0 notification (no id field).
+ * The server sends these without expecting a response.
+ */
+interface JsonRpcNotification {
+  jsonrpc: "2.0";
+  method: string;
+  params?: Record<string, unknown>;
+}
+
+/**
  * Persistent MCP client that communicates with `kin mcp start` over stdio.
  *
  * Protocol: JSON-RPC 2.0 with Content-Length framing (standard MCP).
@@ -52,6 +73,13 @@ export class McpClient implements vscode.Disposable {
   private disposed = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly binaryPath: string | undefined;
+
+  /**
+   * Fires whenever the daemon sends a graph-change notification
+   * (e.g. after a re-index). Subscribers should refresh their UI.
+   */
+  private readonly _onGraphChanged = new vscode.EventEmitter<void>();
+  readonly onGraphChanged: vscode.Event<void> = this._onGraphChanged.event;
 
   constructor(
     private workspacePath: string,
@@ -239,7 +267,13 @@ export class McpClient implements vscode.Disposable {
     }
 
     if (response.id == null) {
-      // Notification — ignore for now
+      // Server-initiated notification (no id field in JSON-RPC).
+      // Check whether this signals a graph change so we can refresh the UI.
+      const notification = response as unknown as JsonRpcNotification;
+      if (GRAPH_CHANGE_NOTIFICATIONS.has(notification.method)) {
+        log(`MCP: graph-change notification received (${notification.method})`);
+        this._onGraphChanged.fire();
+      }
       return;
     }
 
@@ -387,5 +421,6 @@ export class McpClient implements vscode.Disposable {
       this.reconnectTimer = undefined;
     }
     this.killProcess();
+    this._onGraphChanged.dispose();
   }
 }

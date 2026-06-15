@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
-import { join } from "path";
+import { isAbsolute, join } from "path";
 import { KinClient, KinRenameEdit, KinRenamePlan } from "../kin-client";
 import { WorkspaceManager } from "../workspace-manager";
 import { describeError } from "../accessibility";
@@ -127,7 +127,9 @@ export class KinRenameProvider implements vscode.RenameProvider {
     plan: KinRenamePlan,
     edit: KinRenameEdit
   ): Promise<{ uri: vscode.Uri; range: vscode.Range; text: string } | undefined> {
-    const uri = vscode.Uri.file(join(workspacePath, edit.file));
+    const uri = vscode.Uri.file(
+      isAbsolute(edit.file) ? edit.file : join(workspacePath, edit.file)
+    );
     const text = edit.newText ?? edit.replacement ?? edit.text ?? plan.newName;
     const range = await this.resolveRange(uri, plan, edit);
     if (!range) {

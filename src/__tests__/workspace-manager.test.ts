@@ -3,11 +3,20 @@
 
 jest.mock(
   "vscode",
-  () => ({
-    workspace: {
-      getWorkspaceFolder: jest.fn(),
-    },
-  }),
+  () => {
+    class EventEmitter {
+      event = jest.fn();
+      fire = jest.fn();
+      dispose = jest.fn();
+    }
+
+    return {
+      EventEmitter,
+      workspace: {
+        getWorkspaceFolder: jest.fn(),
+      },
+    };
+  },
   { virtual: true }
 );
 

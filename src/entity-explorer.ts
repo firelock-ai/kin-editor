@@ -3,7 +3,7 @@
 
 import * as vscode from "vscode";
 import { KinClient, KinEntity } from "./kin-client";
-import { join } from "path";
+import { isAbsolute, join } from "path";
 import { logError } from "./logger";
 import {
   formatEntityAccessibilityLabel,
@@ -13,6 +13,17 @@ import {
   formatKindGroupLabel,
   formatKindGroupTooltip,
 } from "./accessibility";
+
+/**
+ * Resolve an entity file path to an absolute URI.
+ * Guards against `path.join` silently discarding `workspacePath` when
+ * the engine returns an absolute path for entity.file.
+ */
+function resolveEntityUri(workspacePath: string, entityFile: string): vscode.Uri {
+  return vscode.Uri.file(
+    isAbsolute(entityFile) ? entityFile : join(workspacePath, entityFile)
+  );
+}
 
 type ExplorerNode = KindGroupNode | EntityNode;
 
@@ -79,7 +90,7 @@ export class EntityExplorerProvider
     item.tooltip = formatEntityTooltip(e);
     item.contextValue = "entity";
     item.iconPath = iconForKind(e.kind);
-    item.resourceUri = vscode.Uri.file(join(this.workspacePath, e.file));
+    item.resourceUri = resolveEntityUri(this.workspacePath, e.file);
     item.accessibilityInformation = {
       label: formatEntityAccessibilityLabel(e),
       role: "treeitem",
@@ -88,7 +99,7 @@ export class EntityExplorerProvider
       command: "vscode.open",
       title: "Open Kin Entity",
       arguments: [
-        vscode.Uri.file(join(this.workspacePath, e.file)),
+        resolveEntityUri(this.workspacePath, e.file),
         { selection: new vscode.Range(e.line - 1, 0, e.line - 1, 0) },
       ],
     };
