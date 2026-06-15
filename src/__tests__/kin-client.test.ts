@@ -388,5 +388,25 @@ describe("KinClient", () => {
       expect(result.summary).toBe("Risk: Medium");
       expect(mockExecFile).not.toHaveBeenCalled();
     });
+
+    it("symbolSearch uses semantic_search (name-pattern), not semantic_locate", async () => {
+      const mcp = {
+        isConnected: () => true,
+        callTool: jest.fn().mockResolvedValue(JSON.stringify({
+          results: [
+            { kind: "Function", name: "myFunc", file_path: "src/utils.ts", start_line: 5 },
+          ],
+        })),
+      };
+
+      const client = new KinClient("/workspace", mcp as never);
+      await client.symbolSearch("myFunc");
+
+      expect(mcp.callTool).toHaveBeenCalledWith(
+        "semantic_search",
+        { query: "myFunc", limit: 50, compact: true },
+        15_000
+      );
+    });
   });
 });
