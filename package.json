@@ -31,6 +31,11 @@
   "contributes": {
     "commands": [
       {
+        "command": "kin.setupWorkspace",
+        "title": "Kin: Setup Workspace",
+        "category": "Kin"
+      },
+      {
         "command": "kin.search",
         "title": "Kin: Semantic Search",
         "category": "Kin"
@@ -111,6 +116,12 @@
       ]
     },
     "keybindings": [
+      {
+        "command": "kin.setupWorkspace",
+        "key": "ctrl+shift+k w",
+        "mac": "cmd+shift+k w",
+        "when": "workspaceFolderCount > 0"
+      },
       {
         "command": "kin.search",
         "key": "ctrl+shift+k s",
