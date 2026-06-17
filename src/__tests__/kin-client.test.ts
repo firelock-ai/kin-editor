@@ -389,6 +389,62 @@ describe("KinClient", () => {
       expect(mockExecFile).not.toHaveBeenCalled();
     });
 
+    it("marks overview as not indexed when the MCP graph status is unparseable", async () => {
+      const mcp = {
+        isConnected: () => true,
+        callTool: jest.fn().mockResolvedValue("daemon still warming up"),
+      };
+
+      const client = new KinClient("/workspace", mcp as never);
+      const overview = await client.overview();
+
+      expect(overview.indexed).toBe(false);
+      expect(overview.entities).toBe(0);
+      expect(mockExecFile).not.toHaveBeenCalled();
+    });
+
+    it("marks overview as indexed when the MCP graph status parses", async () => {
+      const mcp = {
+        isConnected: () => true,
+        callTool: jest.fn().mockResolvedValue(
+          JSON.stringify({ entity_count: 42, edge_count: 13, file_count: 7, kinds: { Function: 42 } })
+        ),
+      };
+
+      const client = new KinClient("/workspace", mcp as never);
+      const overview = await client.overview();
+
+      expect(overview).toEqual({
+        entities: 42,
+        edges: 13,
+        files: 7,
+        kinds: { Function: 42 },
+        indexed: true,
+      });
+    });
+
+    it("coalesces concurrent traceQuick calls for the same word into one tool call", async () => {
+      const mcp = {
+        isConnected: () => true,
+        callTool: jest.fn().mockResolvedValue(
+          JSON.stringify({ references: [{ name: "foo", file_path: "src/foo.ts", start_line: 1 }] })
+        ),
+      };
+
+      const client = new KinClient("/workspace", mcp as never);
+      const [a, b] = await Promise.all([
+        client.traceQuick("foo"),
+        client.traceQuick("foo"),
+      ]);
+
+      expect(mcp.callTool).toHaveBeenCalledTimes(1);
+      expect(a).toEqual(b);
+
+      // A second call within the TTL reuses the cached result — still one call.
+      await client.traceQuick("foo");
+      expect(mcp.callTool).toHaveBeenCalledTimes(1);
+    });
+
     it("symbolSearch uses semantic_search (name-pattern), not semantic_locate", async () => {
       const mcp = {
         isConnected: () => true,

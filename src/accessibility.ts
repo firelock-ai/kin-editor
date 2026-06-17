@@ -58,6 +58,17 @@ export function formatStatusBarTooltip(status: KinStatus): string {
 }
 
 export function formatOverviewMessage(overview: KinOverview): string {
+  // When the graph could not be read (daemon not ready / repo not indexed /
+  // unparseable response) we have no real numbers — report that honestly
+  // instead of presenting fabricated zeros as a real graph.
+  if (!overview.indexed) {
+    return "graph not indexed yet — open the workspace setup to index it, or wait for the daemon to finish.";
+  }
+
+  if (overview.entities === 0) {
+    return "no entities indexed yet — the graph is empty or still indexing.";
+  }
+
   // The kin_graph_status MCP tool only guarantees entity_count; edge_count,
   // file_count, and kinds are populated when the daemon reports them.  Omit
   // fields that would show fabricated zeros so the UI stays honest.

@@ -107,12 +107,55 @@ describe("KinRenameProvider", () => {
       {
         uri: { fsPath: "/workspace/src/demo.ts" },
         range: new vscode.Range(
-          new vscode.Position(2, 9),
-          new vscode.Position(2, 16)
+          new vscode.Position(2, 8),
+          new vscode.Position(2, 15)
         ),
         text: "newName",
       },
     ]);
+  });
+
+  it("treats zero-based startCharacter coordinates without further decrement", async () => {
+    const client = {
+      getWorkspacePath: () => "/workspace",
+      renamePlan: jest.fn().mockResolvedValue({
+        entity: { name: "oldName", kind: "Function", file: "src/demo.ts", line: 3 },
+        newName: "newName",
+        edits: [
+          {
+            file: "src/demo.ts",
+            startLine: 3,
+            startCharacter: 8,
+            endLine: 3,
+            endCharacter: 15,
+            replacement: "newName",
+          },
+        ],
+        warnings: [],
+      }),
+    };
+    const manager = {
+      getClientForPath: jest.fn(() => client),
+    } as unknown as WorkspaceManager;
+
+    const provider = new KinRenameProvider(manager);
+    const document = {
+      uri: { fsPath: "/workspace/src/demo.ts" },
+      getWordRangeAtPosition: () =>
+        new vscode.Range(new vscode.Position(2, 8), new vscode.Position(2, 15)),
+      getText: () => "oldName",
+    } as any;
+
+    const edit = await provider.provideRenameEdits(
+      document,
+      new vscode.Position(2, 12),
+      "newName",
+      {} as any
+    );
+
+    expect((edit as any).edits[0].range).toEqual(
+      new vscode.Range(new vscode.Position(2, 8), new vscode.Position(2, 15))
+    );
   });
 
   it("falls back to token lookup when the plan omits columns", async () => {
