@@ -25,7 +25,7 @@ function resolveEntityUri(workspacePath: string, entityFile: string): vscode.Uri
   );
 }
 
-type ExplorerNode = KindGroupNode | EntityNode;
+type ExplorerNode = KindGroupNode | EntityNode | InfoNode;
 
 interface KindGroupNode {
   type: "kind";
@@ -36,6 +36,12 @@ interface KindGroupNode {
 interface EntityNode {
   type: "entity";
   entity: KinEntity;
+}
+
+interface InfoNode {
+  type: "info";
+  message: string;
+  tooltip: string;
 }
 
 export class EntityExplorerProvider
@@ -66,6 +72,21 @@ export class EntityExplorerProvider
   }
 
   getTreeItem(element: ExplorerNode): vscode.TreeItem {
+    if (element.type === "info") {
+      const item = new vscode.TreeItem(
+        element.message,
+        vscode.TreeItemCollapsibleState.None
+      );
+      item.contextValue = "kinInfo";
+      item.iconPath = new vscode.ThemeIcon("info");
+      item.tooltip = element.tooltip;
+      item.accessibilityInformation = {
+        label: element.message,
+        role: "treeitem",
+      };
+      return item;
+    }
+
     if (element.type === "kind") {
       const item = new vscode.TreeItem(
         formatKindGroupLabel(element.kind, element.count),
@@ -119,11 +140,18 @@ export class EntityExplorerProvider
   /**
    * Load only the kind counts via overview (lightweight).
    * Entities are fetched per-kind on tree node expand.
+   *
+   * When the graph cannot be read or holds no entities yet, an honest info
+   * node is returned instead of a silently empty tree, so a demoer never sees
+   * a hollow graph presented as real data.
    */
   private async getKindGroups(): Promise<ExplorerNode[]> {
     if (this.kindCounts.size === 0) {
       try {
         const overview = await this.client.overview();
+        if (!overview.indexed) {
+          return [graphNotIndexedNode()];
+        }
         for (const [kind, count] of Object.entries(overview.kinds)) {
           this.kindCounts.set(kind, count);
         }
@@ -134,8 +162,12 @@ export class EntityExplorerProvider
             this.kindCounts.set(kind, (this.kindCounts.get(kind) ?? 0) + 1);
           }
         }
+        if (this.kindCounts.size === 0) {
+          return [graphEmptyNode()];
+        }
       } catch (err) {
         logError("Failed to load entity overview", err);
+        return [graphUnavailableNode()];
       }
     }
 
@@ -171,6 +203,33 @@ export class EntityExplorerProvider
     }
     return entities.map((entity) => ({ type: "entity" as const, entity }));
   }
+}
+
+function graphNotIndexedNode(): InfoNode {
+  return {
+    type: "info",
+    message: "Graph not indexed yet",
+    tooltip:
+      "Kin has not indexed this workspace yet. Run Kin: Setup Workspace or wait for the daemon to finish indexing, then refresh.",
+  };
+}
+
+function graphEmptyNode(): InfoNode {
+  return {
+    type: "info",
+    message: "No entities found",
+    tooltip:
+      "The Kin graph is reachable but reported no entities yet. Indexing may still be in progress — refresh to retry.",
+  };
+}
+
+function graphUnavailableNode(): InfoNode {
+  return {
+    type: "info",
+    message: "Kin graph unavailable",
+    tooltip:
+      "Could not reach the Kin graph. Check that the kin binary is installed and the daemon is running, then refresh.",
+  };
 }
 
 function iconForKind(kind: string): vscode.ThemeIcon {

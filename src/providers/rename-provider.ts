@@ -187,17 +187,17 @@ export class KinRenameProvider implements vscode.RenameProvider {
     }
 
     const startCharacter = this.pickColumn(
-      edit.startCharacter,
-      edit.startCol,
-      edit.column,
-      edit.character
+      { value: edit.startCharacter, oneBased: false },
+      { value: edit.startCol, oneBased: true },
+      { value: edit.column, oneBased: true },
+      { value: edit.character, oneBased: false }
     );
     const endCharacter = this.pickColumn(
-      edit.endCharacter,
-      edit.endCol,
-      edit.column,
-      edit.character,
-      startCharacter
+      { value: edit.endCharacter, oneBased: false },
+      { value: edit.endCol, oneBased: true },
+      { value: edit.column, oneBased: true },
+      { value: edit.character, oneBased: false },
+      { value: startCharacter, oneBased: false }
     );
     if (
       startCharacter === undefined &&
@@ -224,10 +224,13 @@ export class KinRenameProvider implements vscode.RenameProvider {
     return undefined;
   }
 
-  private pickColumn(...values: Array<number | undefined>): number | undefined {
-    for (const value of values) {
+  private pickColumn(
+    ...candidates: Array<{ value: number | undefined; oneBased: boolean }>
+  ): number | undefined {
+    for (const { value, oneBased } of candidates) {
       if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-        return value;
+        const zeroBased = oneBased ? value - 1 : value;
+        return Math.max(0, zeroBased);
       }
     }
     return undefined;

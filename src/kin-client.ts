@@ -40,6 +40,13 @@ export interface KinOverview {
   edges: number;
   files: number;
   kinds: Record<string, number>;
+  /**
+   * True when the numbers reflect a real graph response. False when the graph
+   * could not be read yet (daemon not ready, repo not indexed, or the response
+   * could not be parsed) — callers must show an honest "not indexed" state
+   * instead of presenting fabricated zeros as real data.
+   */
+  indexed: boolean;
 }
 
 export interface KinReviewFinding {
@@ -92,10 +99,25 @@ export interface KinRenamePlan {
   warnings: string[];
 }
 
+const QUICK_TRACE_CACHE_TTL_MS = 5_000;
+
+interface QuickTraceCacheEntry {
+  expiresAt: number;
+  promise: Promise<KinEntity[]>;
+}
+
 export class KinClient {
   private binaryPath: string | undefined;
   private workspacePath: string;
   private mcpClient: McpClient | null = null;
+
+  /**
+   * Short-lived cache for traceQuick used by hover and go-to-definition.
+   * Coalesces concurrent identical lookups and reuses results within a TTL so
+   * repeated hovers / clicks on the same word do not fan out one subprocess
+   * (or MCP round-trip) per word.
+   */
+  private quickTraceCache = new Map<string, QuickTraceCacheEntry>();
 
   constructor(workspacePath: string, mcpClient?: McpClient) {
     this.workspacePath = workspacePath;
@@ -313,11 +335,18 @@ export class KinClient {
         logError("MCP kin_graph_status failed, falling back to CLI", err);
       }
     }
-    return this.runWithProgress(
+    const cliOverview = await this.runWithProgress(
       "Kin: loading overview...",
-      () => this.runJson<KinOverview>(["overview"], 10_000),
+      () => this.runJson<Partial<KinOverview>>(["overview"], 10_000),
       10_000
     );
+    return {
+      entities: Number(cliOverview.entities ?? 0),
+      edges: Number(cliOverview.edges ?? 0),
+      files: Number(cliOverview.files ?? 0),
+      kinds: cliOverview.kinds ?? {},
+      indexed: true,
+    };
   }
 
   async trace(entity: string): Promise<KinEntity[]> {
@@ -341,6 +370,27 @@ export class KinClient {
   }
 
   async traceQuick(entity: string): Promise<KinEntity[]> {
+    const now = Date.now();
+    const cached = this.quickTraceCache.get(entity);
+    if (cached && cached.expiresAt > now) {
+      return cached.promise;
+    }
+
+    const promise = this.runQuickTrace(entity);
+    this.quickTraceCache.set(entity, {
+      expiresAt: now + QUICK_TRACE_CACHE_TTL_MS,
+      promise,
+    });
+    promise.catch(() => {
+      const current = this.quickTraceCache.get(entity);
+      if (current && current.promise === promise) {
+        this.quickTraceCache.delete(entity);
+      }
+    });
+    return promise;
+  }
+
+  private async runQuickTrace(entity: string): Promise<KinEntity[]> {
     if (this.isMcpConnected()) {
       try {
         const raw = await this.mcpClient!.callTool(
@@ -500,9 +550,10 @@ export class KinClient {
         edges: Number(parsed.edge_count ?? parsed.edges ?? 0),
         files: Number(parsed.file_count ?? parsed.files ?? 0),
         kinds: (parsed.kinds as Record<string, number>) ?? {},
+        indexed: true,
       };
     } catch {
-      return { entities: 0, edges: 0, files: 0, kinds: {} };
+      return { entities: 0, edges: 0, files: 0, kinds: {}, indexed: false };
     }
   }
 

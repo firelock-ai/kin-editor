@@ -65,7 +65,7 @@ export class KinHoverProvider implements vscode.HoverProvider {
     }
 
     const md = new vscode.MarkdownString();
-    md.isTrusted = true;
+    md.supportThemeIcons = true;
 
     // Show the primary entity (first result matching the word)
     const primary = related.find(

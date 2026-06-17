@@ -84,7 +84,32 @@ describe("accessibility strings", () => {
         edges: 7,
         files: 4,
         kinds: { Function: 6, Class: 4 },
+        indexed: true,
       })
     ).toBe("Entities: 10 | Edges: 7 | Files: 4 | Kinds: Function(6), Class(4)");
+  });
+
+  it("reports an honest state instead of fabricated zeros when the graph is not indexed", () => {
+    const message = formatOverviewMessage({
+      entities: 0,
+      edges: 0,
+      files: 0,
+      kinds: {},
+      indexed: false,
+    });
+    expect(message).not.toContain("Entities: 0");
+    expect(message).toMatch(/not indexed/i);
+  });
+
+  it("reports an honest empty state when the graph is indexed but has no entities", () => {
+    const message = formatOverviewMessage({
+      entities: 0,
+      edges: 0,
+      files: 0,
+      kinds: {},
+      indexed: true,
+    });
+    expect(message).not.toContain("Entities: 0");
+    expect(message).toMatch(/no entities/i);
   });
 });
