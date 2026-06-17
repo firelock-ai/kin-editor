@@ -65,6 +65,7 @@ describe("EntityExplorerProvider", () => {
         edges: 0,
         files: 0,
         kinds: { Function: 2, Class: 1 },
+        indexed: true,
       }),
       entities: jest.fn().mockResolvedValue([
         { kind: "Function", name: "alpha", file: "src/a.ts", line: 3 },
@@ -100,5 +101,60 @@ describe("EntityExplorerProvider", () => {
       label: "Function alpha, src/a.ts line 3",
       role: "treeitem",
     });
+  });
+
+  it("shows an honest 'not indexed' node instead of an empty tree when the graph is not indexed", async () => {
+    const client = {
+      overview: jest.fn().mockResolvedValue({
+        entities: 0,
+        edges: 0,
+        files: 0,
+        kinds: {},
+        indexed: false,
+      }),
+      entities: jest.fn(),
+    } as any;
+
+    const provider = new EntityExplorerProvider(client, "/workspace");
+    const nodes = await provider.getChildren();
+
+    expect(nodes).toHaveLength(1);
+    expect((nodes[0] as any).type).toBe("info");
+    expect(client.entities).not.toHaveBeenCalled();
+    const item = provider.getTreeItem(nodes[0]);
+    expect(item.label).toBe("Graph not indexed yet");
+  });
+
+  it("shows an honest 'no entities' node when the graph is indexed but empty", async () => {
+    const client = {
+      overview: jest.fn().mockResolvedValue({
+        entities: 0,
+        edges: 0,
+        files: 0,
+        kinds: {},
+        indexed: true,
+      }),
+      entities: jest.fn().mockResolvedValue([]),
+    } as any;
+
+    const provider = new EntityExplorerProvider(client, "/workspace");
+    const nodes = await provider.getChildren();
+
+    expect(nodes).toHaveLength(1);
+    expect((nodes[0] as any).type).toBe("info");
+    expect(provider.getTreeItem(nodes[0]).label).toBe("No entities found");
+  });
+
+  it("shows an honest 'unavailable' node when the overview call throws", async () => {
+    const client = {
+      overview: jest.fn().mockRejectedValue(new Error("daemon down")),
+      entities: jest.fn(),
+    } as any;
+
+    const provider = new EntityExplorerProvider(client, "/workspace");
+    const nodes = await provider.getChildren();
+
+    expect(nodes).toHaveLength(1);
+    expect(provider.getTreeItem(nodes[0]).label).toBe("Kin graph unavailable");
   });
 });
