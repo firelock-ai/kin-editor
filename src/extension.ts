@@ -11,6 +11,7 @@ import { KinWorkspaceSymbolProvider } from "./providers/symbol-provider";
 import { KinReviewProvider } from "./providers/review-provider";
 import { KinRenameProvider } from "./providers/rename-provider";
 import { showSearchQuickPick, showTraceQuickPick } from "./search-panel";
+import { showSetupWorkspace } from "./setup-panel";
 import { initLogger, log } from "./logger";
 import { WorkspaceManager } from "./workspace-manager";
 import {
@@ -37,6 +38,23 @@ export function activate(context: vscode.ExtensionContext): void {
 
   manager = new WorkspaceManager(folders, mcpEnabled);
   context.subscriptions.push(manager);
+
+  const setupCwd = (): string | undefined => {
+    const active = vscode.window.activeTextEditor?.document.uri;
+    if (active && active.scheme === "file") {
+      const owning = vscode.workspace.getWorkspaceFolder(active);
+      if (owning) {
+        return owning.uri.fsPath;
+      }
+    }
+    return folders[0]?.uri.fsPath;
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("kin.setupWorkspace", () =>
+      showSetupWorkspace(context, setupCwd())
+    )
+  );
 
   // If no kin-enabled folders, only register init command
   if (manager.size === 0) {
