@@ -20,6 +20,6 @@
 To build and package the extension locally:
 ```sh
 npm install
-npm run package
+npm run package:vsix
 ```
 This packages the extension into a `.vsix` file which can be installed manually in VS Code.
