@@ -391,19 +391,19 @@ export class KinClient {
   }
 
   private async runQuickTrace(entity: string): Promise<KinEntity[]> {
-    if (this.isMcpConnected()) {
-      try {
-        const raw = await this.mcpClient!.callTool(
-          "find_references",
-          { query: entity },
-          3_000,
-        );
-        return this.parseEntitiesFromMcp(raw);
-      } catch {
-        // Silent fallback for quick queries
-      }
+    if (!this.isMcpConnected()) {
+      return [];
     }
-    return this.runJson<KinEntity[]>(["trace", entity], 3_000);
+    try {
+      const raw = await this.mcpClient!.callTool(
+        "find_references",
+        { query: entity },
+        3_000,
+      );
+      return this.parseEntitiesFromMcp(raw);
+    } catch {
+      return [];
+    }
   }
 
   async status(): Promise<KinStatus> {
