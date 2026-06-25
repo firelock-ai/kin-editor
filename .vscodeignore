@@ -2,8 +2,15 @@
 .vscode-test/**
 src/**
 .kin/**
+.github/**
+scripts/**
 .gitignore
+.eslintrc.cjs
 tsconfig.json
+CLAUDE.md
+SECURITY.md
+package-lock.json
+resources/icon.svg
 kin-*.vsix
 node_modules/**
 **/*.map

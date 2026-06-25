@@ -74,5 +74,5 @@ jobs:
             exit 0
           fi
           version="${RELEASE_VERSION#v}"
-          npx --yes ovsx publish "kin-${version}.vsix" -p "$OVSX_TOKEN"
+          npx --yes ovsx publish "kin-${version}.vsix" -p "$OVSX_TOKEN" --skip-duplicate
           echo "Published kin-${version}.vsix to Open VSX"
