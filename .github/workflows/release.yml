@@ -63,3 +63,16 @@ jobs:
 
           console.log(`Published ${packagePath} to Visual Studio Marketplace`);
           NODE
+
+      - name: Publish VSIX to Open VSX
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+          OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
+        run: |
+          if [ -z "${OVSX_TOKEN:-}" ]; then
+            echo "OVSX_TOKEN is not configured; skipping Open VSX publish"
+            exit 0
+          fi
+          version="${RELEASE_VERSION#v}"
+          npx --yes ovsx publish "kin-${version}.vsix" -p "$OVSX_TOKEN"
+          echo "Published kin-${version}.vsix to Open VSX"
