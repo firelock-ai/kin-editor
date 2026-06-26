@@ -40,6 +40,7 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: kin-*.vsix
       - name: Publish VSIX to Visual Studio Marketplace
+        continue-on-error: true
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
           VSCE_TOKEN: ${{ secrets.VSCE_TOKEN }}
@@ -65,6 +66,7 @@ jobs:
           NODE
 
       - name: Publish VSIX to Open VSX
+        if: ${{ !cancelled() }}
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
           OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
