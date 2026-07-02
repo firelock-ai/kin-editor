@@ -389,7 +389,7 @@ describe("KinClient", () => {
       expect(mockExecFile).not.toHaveBeenCalled();
     });
 
-    it("marks overview as not indexed when the MCP graph status is unparseable", async () => {
+    it("marks overview as an invalid response (not an empty graph) when the MCP graph status is unparseable", async () => {
       const mcp = {
         isConnected: () => true,
         callTool: jest.fn().mockResolvedValue("daemon still warming up"),
@@ -398,6 +398,8 @@ describe("KinClient", () => {
       const client = new KinClient("/workspace", mcp as never);
       const overview = await client.overview();
 
+      // A garbled reply is surfaced as invalid, distinct from a real empty graph.
+      expect(overview.availability).toBe("invalid-response");
       expect(overview.indexed).toBe(false);
       expect(overview.entities).toBe(0);
       expect(mockExecFile).not.toHaveBeenCalled();
@@ -420,7 +422,74 @@ describe("KinClient", () => {
         files: 7,
         kinds: { Function: 42 },
         indexed: true,
+        availability: "indexed",
+        compatFallback: false,
       });
+    });
+
+    it("marks a reachable-but-empty graph as empty, not indexed", async () => {
+      const mcp = {
+        isConnected: () => true,
+        callTool: jest.fn().mockResolvedValue(
+          JSON.stringify({ entity_count: 0, edge_count: 0, file_count: 0, kinds: {} })
+        ),
+      };
+
+      const client = new KinClient("/workspace", mcp as never);
+      const overview = await client.overview();
+
+      expect(overview.availability).toBe("empty");
+      expect(overview.indexed).toBe(false);
+      expect(overview.compatFallback).toBe(false);
+    });
+
+    it("degrades to the CLI compatibility path (compatFallback) when the MCP graph call fails", async () => {
+      const mcp = {
+        isConnected: () => true,
+        callTool: jest.fn().mockRejectedValue(new Error("mcp broke")),
+      };
+      mockExecFile.mockImplementation(
+        (
+          _bin: string,
+          _args: string[],
+          _opts: unknown,
+          cb: (err: Error | null, stdout: string, stderr: string) => void
+        ) => {
+          cb(null, JSON.stringify({ entities: 5, edges: 1, files: 2, kinds: { Function: 5 } }), "");
+        }
+      );
+
+      const client = new KinClient("/workspace", mcp as never);
+      const overview = await client.overview();
+
+      expect(overview.availability).toBe("indexed");
+      expect(overview.compatFallback).toBe(true);
+      expect(overview.entities).toBe(5);
+      expect(mockExecFile).toHaveBeenCalled();
+    });
+
+    it("reports unavailable when both the MCP and CLI overview paths fail", async () => {
+      const mcp = {
+        isConnected: () => true,
+        callTool: jest.fn().mockRejectedValue(new Error("mcp down")),
+      };
+      mockExecFile.mockImplementation(
+        (
+          _bin: string,
+          _args: string[],
+          _opts: unknown,
+          cb: (err: Error | null, stdout: string, stderr: string) => void
+        ) => {
+          cb(new Error("cli down"), "", "cli down");
+        }
+      );
+
+      const client = new KinClient("/workspace", mcp as never);
+      const overview = await client.overview();
+
+      expect(overview.availability).toBe("unavailable");
+      expect(overview.compatFallback).toBe(true);
+      expect(overview.indexed).toBe(false);
     });
 
     it("coalesces concurrent traceQuick calls for the same word into one tool call", async () => {

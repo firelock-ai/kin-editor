@@ -85,6 +85,8 @@ describe("accessibility strings", () => {
         files: 4,
         kinds: { Function: 6, Class: 4 },
         indexed: true,
+        availability: "indexed",
+        compatFallback: false,
       })
     ).toBe("Entities: 10 | Edges: 7 | Files: 4 | Kinds: Function(6), Class(4)");
   });
@@ -96,6 +98,8 @@ describe("accessibility strings", () => {
       files: 0,
       kinds: {},
       indexed: false,
+      availability: "not-indexed",
+      compatFallback: false,
     });
     expect(message).not.toContain("Entities: 0");
     expect(message).toMatch(/not indexed/i);
@@ -107,9 +111,54 @@ describe("accessibility strings", () => {
       edges: 0,
       files: 0,
       kinds: {},
-      indexed: true,
+      indexed: false,
+      availability: "empty",
+      compatFallback: false,
     });
     expect(message).not.toContain("Entities: 0");
     expect(message).toMatch(/no entities/i);
+  });
+
+  it("distinguishes an unavailable daemon from an empty graph", () => {
+    const message = formatOverviewMessage({
+      entities: 0,
+      edges: 0,
+      files: 0,
+      kinds: {},
+      indexed: false,
+      availability: "unavailable",
+      compatFallback: false,
+    });
+    expect(message).not.toContain("Entities: 0");
+    expect(message).toMatch(/unavailable/i);
+  });
+
+  it("distinguishes an invalid/unreadable response from an empty graph", () => {
+    const message = formatOverviewMessage({
+      entities: 0,
+      edges: 0,
+      files: 0,
+      kinds: {},
+      indexed: false,
+      availability: "invalid-response",
+      compatFallback: false,
+    });
+    expect(message).not.toContain("Entities: 0");
+    expect(message).toMatch(/unreadable|could not parse/i);
+    expect(message).toMatch(/not an empty graph/i);
+  });
+
+  it("surfaces the partial compatibility fallback when the CLI answered for a failed MCP path", () => {
+    const message = formatOverviewMessage({
+      entities: 12,
+      edges: 3,
+      files: 5,
+      kinds: { Function: 12 },
+      indexed: true,
+      availability: "indexed",
+      compatFallback: true,
+    });
+    expect(message).toContain("Entities: 12");
+    expect(message).toMatch(/compatibility fallback/i);
   });
 });

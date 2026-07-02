@@ -66,6 +66,8 @@ describe("EntityExplorerProvider", () => {
         files: 0,
         kinds: { Function: 2, Class: 1 },
         indexed: true,
+        availability: "indexed",
+        compatFallback: false,
       }),
       entities: jest.fn().mockResolvedValue([
         { kind: "Function", name: "alpha", file: "src/a.ts", line: 3 },
@@ -111,6 +113,8 @@ describe("EntityExplorerProvider", () => {
         files: 0,
         kinds: {},
         indexed: false,
+        availability: "not-indexed",
+        compatFallback: false,
       }),
       entities: jest.fn(),
     } as any;
@@ -125,6 +129,32 @@ describe("EntityExplorerProvider", () => {
     expect(item.label).toBe("Graph not indexed yet");
   });
 
+  it("shows a distinct 'unreadable response' node when the graph reply is invalid", async () => {
+    const client = {
+      overview: jest.fn().mockResolvedValue({
+        entities: 0,
+        edges: 0,
+        files: 0,
+        kinds: {},
+        indexed: false,
+        availability: "invalid-response",
+        compatFallback: false,
+      }),
+      entities: jest.fn(),
+    } as any;
+
+    const provider = new EntityExplorerProvider(client, "/workspace");
+    const nodes = await provider.getChildren();
+
+    expect(nodes).toHaveLength(1);
+    expect((nodes[0] as any).type).toBe("info");
+    // Invalid must NOT collapse into "not indexed" or "no entities".
+    expect(client.entities).not.toHaveBeenCalled();
+    expect(provider.getTreeItem(nodes[0]).label).toBe(
+      "Kin graph returned an unreadable response"
+    );
+  });
+
   it("shows an honest 'no entities' node when the graph is indexed but empty", async () => {
     const client = {
       overview: jest.fn().mockResolvedValue({
@@ -132,7 +162,9 @@ describe("EntityExplorerProvider", () => {
         edges: 0,
         files: 0,
         kinds: {},
-        indexed: true,
+        indexed: false,
+        availability: "empty",
+        compatFallback: false,
       }),
       entities: jest.fn().mockResolvedValue([]),
     } as any;
