@@ -56,33 +56,51 @@ export function activate(context: vscode.ExtensionContext): void {
     )
   );
 
-  // If no kin-enabled folders, only register init command
+  // No Kin-initialized folder yet — a fresh machine or a not-yet-indexed
+  // workspace. Still register every contributed command so the palette and
+  // context menus never answer a first-run user with "command not found":
+  // kin.init runs the real initialization, and the query commands guide the
+  // user into setup instead of failing. kin.setupWorkspace is registered above
+  // and works here too.
   if (manager.size === 0) {
-    const autoStart = config.get<boolean>("autoStart", true);
-    if (autoStart) {
-      context.subscriptions.push(
-        vscode.commands.registerCommand("kin.init", async () => {
-          const resolved =
-            folders.length === 1
-              ? folders[0]
-              : await vscode.window.showWorkspaceFolderPick({
-                  placeHolder: "Select folder to initialize Kin in",
-                });
-          if (!resolved) return;
-          const client = new KinClient(resolved.uri.fsPath);
-          try {
-            await client.init();
-            vscode.window.showInformationMessage(
-              "Kin repository initialized. Reload this window to activate the explorer and commands."
-            );
-          } catch (err) {
-            vscode.window.showErrorMessage(
-              `Kin init failed: ${describeError(err)}`
-            );
-          }
-        })
+    const initInThisWorkspace = async () => {
+      const resolved =
+        folders.length === 1
+          ? folders[0]
+          : await vscode.window.showWorkspaceFolderPick({
+              placeHolder: "Select folder to initialize Kin in",
+            });
+      if (!resolved) return;
+      const client = new KinClient(resolved.uri.fsPath);
+      try {
+        await client.init();
+        vscode.window.showInformationMessage(
+          "Kin repository initialized. Reload this window to activate the explorer and commands."
         );
-    }
+      } catch (err) {
+        vscode.window.showErrorMessage(`Kin init failed: ${describeError(err)}`);
+      }
+    };
+
+    const guideToSetup = async () => {
+      const choice = await vscode.window.showInformationMessage(
+        "Kin isn't initialized in this folder yet. Set it up to enable search, trace, and review.",
+        "Set up Kin",
+        "Initialize Repository"
+      );
+      if (choice === "Set up Kin") {
+        await vscode.commands.executeCommand("kin.setupWorkspace");
+      } else if (choice === "Initialize Repository") {
+        await vscode.commands.executeCommand("kin.init");
+      }
+    };
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand("kin.init", initInThisWorkspace),
+      ...["kin.search", "kin.overview", "kin.trace", "kin.status", "kin.review", "kin.refresh"].map(
+        (id) => vscode.commands.registerCommand(id, guideToSetup)
+      )
+    );
     return;
   }
 
