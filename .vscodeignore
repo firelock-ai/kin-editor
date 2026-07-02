@@ -6,7 +6,8 @@ src/**
 scripts/**
 .gitignore
 .eslintrc.cjs
-tsconfig.json
+tsconfig*.json
+release.toml
 CLAUDE.md
 SECURITY.md
 package-lock.json

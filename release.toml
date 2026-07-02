@@ -1,0 +1,79 @@
+# Kin-editor release policy — the extension's entry in the cross-repo release
+# graph (FIR-1058 / FIR-1066). Read by scripts/release-policy.mjs and the
+# release-policy CI job. It makes extension version bumps, marketplace/package
+# publishes, and CLI/daemon/MCP compatibility policy-gated instead of ad hoc.
+#
+# kin-editor is an npm/VSIX extension, not a Cargo crate, so it is not part of
+# bin/kin-release's registry graph; this file is the editor-native equivalent.
+
+schema = 1
+component = "kin-editor"
+kind = "vscode-extension"
+
+[version]
+# Version source of truth. The VSIX and every publish target derive from this.
+file = "package.json"
+field = "version"
+tag_pattern = "v*.*.*"
+
+[publish]
+# Publish targets fired by .github/workflows/release.yml on a v*.*.* tag push.
+targets = ["vscode-marketplace", "open-vsx", "github-release"]
+
+[checks]
+# Smoke checks that gate a release (mirror ci.yml + the release validate job).
+pre_publish = ["npm ci", "npm run compile", "npm run lint", "npm test"]
+package = "node ./scripts/package-vsix.mjs"
+
+[compatibility]
+# Constraints against the Kin surfaces the extension speaks to. `mcp_protocol`
+# is the wire contract asserted in src/mcp-client.ts's initialize handshake and
+# is source-checked by `release-policy verify` so this record cannot drift from
+# the code. The extension degrades to the CLI compatibility path below the
+# minimums but is not proven there.
+mcp_protocol = "2024-11-05"
+kin_cli_min = "0.2.0"
+kin_daemon_min = "0.2.0"
+
+[[compatibility.matrix]]
+extension = ">=0.1.0 <0.2.0"
+kin_cli = ">=0.2.0"
+mcp_protocol = "2024-11-05"
+notes = "M1.5 line: entity explorer, semantic search, trace, review, rename, setup health, live-MCP state handling."
+
+[release_gate]
+# A version bump cuts a tag and publishes, so it is only justified when a real
+# extension surface changed — the compiled artifact, its UX, or public docs. A
+# change confined to dependency manifests or the compatibility record is a
+# mechanical "consumer bump" (e.g. the release orchestrator advancing the
+# recorded compatible CLI version) and must NOT carry a version bump that
+# auto-releases the extension. Enforced by `release-policy check-bump`.
+release_impacting = [
+  "src/**",
+  "resources/**",
+  "README.md",
+  "CHANGELOG.md",
+]
+# Changes confined to these are dependency/compat "consumer bumps": they update
+# manifests or the compatibility record without changing the shipped extension,
+# so they must not auto-release.
+dependency_only = [
+  "package.json",
+  "package-lock.json",
+  "release.toml",
+]
+
+[proof_impacting]
+# First-run / editor proof surfaces (FIR-1033, FIR-1093). A change here means
+# the first-run acceptance matrix and the live-MCP integration proof must be
+# re-validated before release; `release-policy check-bump` flags it for review.
+surfaces = [
+  "src/extension.ts",
+  "src/setup-health.ts",
+  "src/setup-panel.ts",
+  "src/status-bar.ts",
+  "src/mcp-client.ts",
+  "src/kin-client.ts",
+  "src/__tests__/first-run-matrix.test.ts",
+  "src/__tests__/mcp-integration.test.ts",
+]
