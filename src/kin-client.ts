@@ -35,18 +35,37 @@ export interface KinStatus {
   graphState: string;
 }
 
+/**
+ * Fine-grained graph availability so the UI can distinguish an empty graph
+ * from an unreachable daemon, a garbled/unparseable response, or a workspace
+ * that simply has not been indexed yet — instead of collapsing every non-happy
+ * path into a single "not indexed" or empty state.
+ */
+export type GraphAvailability =
+  | "indexed" // a real graph response with entities
+  | "empty" // graph reachable, but zero entities yet
+  | "not-indexed" // reachable, but this workspace is not indexed yet
+  | "unavailable" // the daemon / binary could not be reached
+  | "invalid-response"; // a response arrived but could not be parsed as graph data
+
 export interface KinOverview {
   entities: number;
   edges: number;
   files: number;
   kinds: Record<string, number>;
   /**
-   * True when the numbers reflect a real graph response. False when the graph
-   * could not be read yet (daemon not ready, repo not indexed, or the response
-   * could not be parsed) — callers must show an honest "not indexed" state
-   * instead of presenting fabricated zeros as real data.
+   * Back-compat convenience: true iff {@link availability} is "indexed".
+   * Prefer `availability` for user-facing messaging.
    */
   indexed: boolean;
+  /** Fine-grained graph state — see {@link GraphAvailability}. */
+  availability: GraphAvailability;
+  /**
+   * True when the MCP graph path was expected (an MCP client was connected) but
+   * a call failed and the CLI compatibility path answered instead — a partial /
+   * degraded state the UI should surface, not hide.
+   */
+  compatFallback: boolean;
 }
 
 export interface KinReviewFinding {
@@ -323,7 +342,8 @@ export class KinClient {
   }
 
   async overview(): Promise<KinOverview> {
-    if (this.isMcpConnected()) {
+    const mcpWasConnected = this.isMcpConnected();
+    if (mcpWasConnected) {
       try {
         const raw = await this.mcpClient!.callTool(
           "kin_graph_status",
@@ -333,20 +353,40 @@ export class KinClient {
         return this.parseOverviewFromMcp(raw);
       } catch (err) {
         logError("MCP kin_graph_status failed, falling back to CLI", err);
+        // Degrade to the CLI compatibility path below.
       }
     }
-    const cliOverview = await this.runWithProgress(
-      "Kin: loading overview...",
-      () => this.runJson<Partial<KinOverview>>(["overview"], 10_000),
-      10_000
-    );
-    return {
-      entities: Number(cliOverview.entities ?? 0),
-      edges: Number(cliOverview.edges ?? 0),
-      files: Number(cliOverview.files ?? 0),
-      kinds: cliOverview.kinds ?? {},
-      indexed: true,
-    };
+    try {
+      const cliOverview = await this.runWithProgress(
+        "Kin: loading overview...",
+        () => this.runJson<Partial<KinOverview>>(["overview"], 10_000),
+        10_000
+      );
+      const entities = Number(cliOverview.entities ?? 0);
+      return {
+        entities,
+        edges: Number(cliOverview.edges ?? 0),
+        files: Number(cliOverview.files ?? 0),
+        kinds: cliOverview.kinds ?? {},
+        indexed: entities > 0,
+        availability: entities > 0 ? "indexed" : "empty",
+        compatFallback: mcpWasConnected,
+      };
+    } catch (err) {
+      // Both the MCP graph path and the CLI compatibility path failed — the
+      // graph is unavailable. Report that honestly rather than a fabricated
+      // empty overview.
+      logError("Kin overview failed on both MCP and CLI paths", err);
+      return {
+        entities: 0,
+        edges: 0,
+        files: 0,
+        kinds: {},
+        indexed: false,
+        availability: "unavailable",
+        compatFallback: mcpWasConnected,
+      };
+    }
   }
 
   async trace(entity: string): Promise<KinEntity[]> {
@@ -543,18 +583,44 @@ export class KinClient {
   }
 
   private parseOverviewFromMcp(raw: string): KinOverview {
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(raw);
-      return {
-        entities: Number(parsed.entity_count ?? parsed.entities ?? 0),
-        edges: Number(parsed.edge_count ?? parsed.edges ?? 0),
-        files: Number(parsed.file_count ?? parsed.files ?? 0),
-        kinds: (parsed.kinds as Record<string, number>) ?? {},
-        indexed: true,
-      };
+      parsed = JSON.parse(raw);
     } catch {
-      return { entities: 0, edges: 0, files: 0, kinds: {}, indexed: false };
+      // A response arrived but is not JSON. This is a broken / still-warming
+      // daemon reply, NOT an empty graph — surface it as invalid so the UI
+      // never presents a garbled response as "0 entities".
+      return {
+        entities: 0,
+        edges: 0,
+        files: 0,
+        kinds: {},
+        indexed: false,
+        availability: "invalid-response",
+        compatFallback: false,
+      };
     }
+    if (!this.isRecord(parsed)) {
+      return {
+        entities: 0,
+        edges: 0,
+        files: 0,
+        kinds: {},
+        indexed: false,
+        availability: "invalid-response",
+        compatFallback: false,
+      };
+    }
+    const entities = Number(parsed.entity_count ?? parsed.entities ?? 0);
+    return {
+      entities,
+      edges: Number(parsed.edge_count ?? parsed.edges ?? 0),
+      files: Number(parsed.file_count ?? parsed.files ?? 0),
+      kinds: (parsed.kinds as Record<string, number>) ?? {},
+      indexed: entities > 0,
+      availability: entities > 0 ? "indexed" : "empty",
+      compatFallback: false,
+    };
   }
 
   private parseStatusFromMcp(raw: string): KinStatus {

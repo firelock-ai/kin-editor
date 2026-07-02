@@ -58,6 +58,18 @@ interface JsonRpcNotification {
   params?: Record<string, unknown>;
 }
 
+/** Construction options for {@link McpClient}. */
+export interface McpClientOptions {
+  /** Default per-request timeout in milliseconds. */
+  timeoutMs?: number;
+  /**
+   * Override the spawned process. Defaults to the resolved kin binary with
+   * `["mcp", "start"]`. Tests inject a fixture MCP server here to exercise the
+   * real stdio/JSON-RPC transport without a live Kin daemon.
+   */
+  spawn?: { command: string; args: string[] };
+}
+
 /**
  * Persistent MCP client that communicates with `kin mcp start` over stdio.
  *
@@ -73,6 +85,8 @@ export class McpClient implements vscode.Disposable {
   private disposed = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly binaryPath: string | undefined;
+  private readonly defaultTimeoutMs: number;
+  private readonly spawnOverride: { command: string; args: string[] } | undefined;
 
   /**
    * Fires whenever the daemon sends a graph-change notification
@@ -83,8 +97,10 @@ export class McpClient implements vscode.Disposable {
 
   constructor(
     private workspacePath: string,
-    private readonly defaultTimeoutMs: number = 15_000,
+    options: McpClientOptions = {},
   ) {
+    this.defaultTimeoutMs = options.timeoutMs ?? 15_000;
+    this.spawnOverride = options.spawn;
     this.binaryPath = this.resolveBinary();
   }
 
@@ -111,7 +127,7 @@ export class McpClient implements vscode.Disposable {
     if (this.disposed) {
       return;
     }
-    if (!this.binaryPath) {
+    if (!this.spawnOverride && !this.binaryPath) {
       log("MCP: no kin binary found, skipping connection");
       return;
     }
@@ -130,7 +146,11 @@ export class McpClient implements vscode.Disposable {
   private spawnProcess(): void {
     this.killProcess();
 
-    const proc = spawn(this.binaryPath!, ["mcp", "start"], {
+    const { command, args } = this.spawnOverride ?? {
+      command: this.binaryPath!,
+      args: ["mcp", "start"],
+    };
+    const proc = spawn(command, args, {
       cwd: this.workspacePath,
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env },

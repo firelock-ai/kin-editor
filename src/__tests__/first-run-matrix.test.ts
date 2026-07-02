@@ -262,13 +262,29 @@ describe("first-run matrix — status-bar copy", () => {
 
 describe("first-run matrix — overview / graph-state copy", () => {
   it("never presents fabricated zeros when the graph is not indexed yet", () => {
-    const msg = formatOverviewMessage({ entities: 0, edges: 0, files: 0, kinds: {}, indexed: false });
+    const msg = formatOverviewMessage({
+      entities: 0,
+      edges: 0,
+      files: 0,
+      kinds: {},
+      indexed: false,
+      availability: "not-indexed",
+      compatFallback: false,
+    });
     expect(msg).not.toContain("Entities: 0");
     expect(msg).toMatch(/not indexed/i);
   });
 
   it("distinguishes a reachable-but-empty graph from a not-indexed one", () => {
-    const msg = formatOverviewMessage({ entities: 0, edges: 0, files: 0, kinds: {}, indexed: true });
+    const msg = formatOverviewMessage({
+      entities: 0,
+      edges: 0,
+      files: 0,
+      kinds: {},
+      indexed: false,
+      availability: "empty",
+      compatFallback: false,
+    });
     expect(msg).not.toContain("Entities: 0");
     expect(msg).toMatch(/no entities/i);
   });
@@ -280,6 +296,8 @@ describe("first-run matrix — overview / graph-state copy", () => {
       files: 4,
       kinds: { Function: 6, Class: 4 },
       indexed: true,
+      availability: "indexed",
+      compatFallback: false,
     });
     expect(msg).toBe("Entities: 10 | Edges: 7 | Files: 4 | Kinds: Function(6), Class(4)");
   });

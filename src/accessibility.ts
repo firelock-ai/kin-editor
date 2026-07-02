@@ -58,15 +58,19 @@ export function formatStatusBarTooltip(status: KinStatus): string {
 }
 
 export function formatOverviewMessage(overview: KinOverview): string {
-  // When the graph could not be read (daemon not ready / repo not indexed /
-  // unparseable response) we have no real numbers — report that honestly
-  // instead of presenting fabricated zeros as a real graph.
-  if (!overview.indexed) {
-    return "graph not indexed yet — open the workspace setup to index it, or wait for the daemon to finish.";
-  }
-
-  if (overview.entities === 0) {
-    return "no entities indexed yet — the graph is empty or still indexing.";
+  // Distinguish every non-happy graph state honestly instead of presenting
+  // fabricated zeros as a real graph. Each state gets its own recovery hint.
+  switch (overview.availability) {
+    case "not-indexed":
+      return "graph not indexed yet — open the workspace setup to index it, or wait for the daemon to finish.";
+    case "unavailable":
+      return "graph unavailable — the Kin daemon could not be reached. Check that kin is installed and running, then retry.";
+    case "invalid-response":
+      return "graph returned an unreadable response — the daemon replied with data Kin could not parse. This is a broken or still-starting daemon, not an empty graph. Retry, or check the daemon logs.";
+    case "empty":
+      return "no entities indexed yet — the graph is empty or still indexing.";
+    case "indexed":
+      break;
   }
 
   // The kin_graph_status MCP tool only guarantees entity_count; edge_count,
@@ -89,7 +93,13 @@ export function formatOverviewMessage(overview: KinOverview): string {
     parts.push(`Kinds: ${kindSummary}`);
   }
 
-  return parts.join(" | ");
+  let message = parts.join(" | ");
+  if (overview.compatFallback) {
+    // The MCP graph path was expected but a call failed and the CLI answered.
+    // Surface the degraded state rather than passing it off as the graph path.
+    message += " (via CLI compatibility fallback — MCP graph path unavailable)";
+  }
+  return message;
 }
 
 export function describeError(err: unknown): string {

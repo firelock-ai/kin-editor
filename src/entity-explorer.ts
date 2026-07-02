@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
-import { KinClient, KinEntity } from "./kin-client";
+import { GraphAvailability, KinClient, KinEntity } from "./kin-client";
 import { isAbsolute, join } from "path";
 import { logError } from "./logger";
 import {
@@ -149,8 +149,9 @@ export class EntityExplorerProvider
     if (this.kindCounts.size === 0) {
       try {
         const overview = await this.client.overview();
-        if (!overview.indexed) {
-          return [graphNotIndexedNode()];
+        const stateNode = infoNodeForAvailability(overview.availability);
+        if (stateNode) {
+          return [stateNode];
         }
         for (const [kind, count] of Object.entries(overview.kinds)) {
           this.kindCounts.set(kind, count);
@@ -205,12 +206,46 @@ export class EntityExplorerProvider
   }
 }
 
+/**
+ * Map a fine-grained graph availability to the honest info node the tree should
+ * show, or `undefined` when the graph is genuinely indexed and entities should
+ * be listed. This is what keeps "unreachable" / "unreadable response" from
+ * masquerading as an empty graph.
+ */
+function infoNodeForAvailability(
+  availability: GraphAvailability
+): InfoNode | undefined {
+  switch (availability) {
+    case "not-indexed":
+      return graphNotIndexedNode();
+    case "unavailable":
+      return graphUnavailableNode();
+    case "invalid-response":
+      return graphInvalidResponseNode();
+    case "empty":
+      return graphEmptyNode();
+    case "indexed":
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
 function graphNotIndexedNode(): InfoNode {
   return {
     type: "info",
     message: "Graph not indexed yet",
     tooltip:
       "Kin has not indexed this workspace yet. Run Kin: Setup Workspace or wait for the daemon to finish indexing, then refresh.",
+  };
+}
+
+function graphInvalidResponseNode(): InfoNode {
+  return {
+    type: "info",
+    message: "Kin graph returned an unreadable response",
+    tooltip:
+      "The Kin daemon replied with data the editor could not parse. This is a broken or still-starting daemon, not an empty graph. Check that the kin daemon is healthy, then refresh.",
   };
 }
 
