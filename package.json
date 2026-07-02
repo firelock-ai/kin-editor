@@ -189,7 +189,7 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
+    "compile": "tsc -p ./tsconfig.build.json",
     "watch": "tsc -watch -p ./",
     "package:vsix": "npx @vscode/vsce package",
     "lint": "eslint src --ext ts",
@@ -211,6 +211,7 @@
     ]
   },
   "devDependencies": {
+    "@iarna/toml": "^2.2.5",
     "@types/jest": "^29.5.0",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
