@@ -355,7 +355,7 @@ export class McpClient implements vscode.Disposable {
         capabilities: {},
         clientInfo: {
           name: "kin-editor",
-          version: "0.1.0",
+          version: "0.1.1",
         },
       },
       10_000,
