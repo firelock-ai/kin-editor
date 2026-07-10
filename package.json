@@ -2,7 +2,7 @@
   "name": "kin-editor",
   "displayName": "Kin - Semantic Code Intelligence",
   "description": "VS Code extension for Kin, the system of record for AI-written software: entity explorer, semantic search, trace, review, and rename powered by the Kin graph engine.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "firelock",
   "license": "Apache-2.0",
   "engines": {
