@@ -40,9 +40,19 @@ npm run package:vsix
 
 ## kin-editor's role
 
-The extension requires a running Kin daemon (`kin daemon start`) in the workspace.
-It connects over MCP for zero-overhead graph queries and falls back to the `kin`
-CLI subprocess when the daemon is unavailable.
+Set up Kin for editor use once with:
+
+```sh
+kin setup --intent editor
+```
+
+Initialize each workspace with `kin init .` if it does not already contain
+`.kin/`, then run `kin status` to inspect its working-copy state. The extension
+launches `kin mcp start`, which starts or reuses the repository daemon
+automatically. There is no separate daemon start command.
+
+The extension uses a persistent MCP connection for graph queries and falls back
+to `kin` CLI subprocesses when that connection is unavailable.
 
 Features:
 
