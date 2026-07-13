@@ -34,21 +34,13 @@ jobs:
         run: node ./scripts/package-vsix.mjs
         env:
           TAG_NAME: ${{ github.ref_name }}
-      - uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          files: kin-*.vsix
       - name: Publish VSIX to Visual Studio Marketplace
-        continue-on-error: true
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
           VSCE_TOKEN: ${{ secrets.VSCE_TOKEN }}
         run: |
-          if [ -z "${VSCE_TOKEN:-}" ]; then
-            echo "VSCE_TOKEN is not configured; skipping Visual Studio Marketplace publish"
-            exit 0
-          fi
+          set -euo pipefail
+          : "${VSCE_TOKEN:?VSCE_TOKEN is required for a release}"
 
           node --input-type=module <<'NODE'
           import { publishVSIX } from "@vscode/vsce";
@@ -65,16 +57,59 @@ jobs:
           console.log(`Published ${packagePath} to Visual Studio Marketplace`);
           NODE
 
+      - name: Verify exact Visual Studio Marketplace version
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_VERSION#v}"
+          for attempt in $(seq 1 20); do
+            if ./node_modules/.bin/vsce show firelock.kin-editor --json \
+              | jq -e --arg version "$version" \
+                '.versions | any(.version == $version)' >/dev/null; then
+              echo "Visual Studio Marketplace exposes firelock.kin-editor ${version}"
+              exit 0
+            fi
+            echo "Marketplace version ${version} not visible yet (attempt ${attempt}/20)"
+            sleep 15
+          done
+          echo "::error::Visual Studio Marketplace does not expose firelock.kin-editor ${version}"
+          exit 1
+
       - name: Publish VSIX to Open VSX
-        if: ${{ !cancelled() }}
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
           OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
         run: |
-          if [ -z "${OVSX_TOKEN:-}" ]; then
-            echo "OVSX_TOKEN is not configured; skipping Open VSX publish"
-            exit 0
-          fi
+          set -euo pipefail
+          : "${OVSX_TOKEN:?OVSX_TOKEN is required for a release}"
           version="${RELEASE_VERSION#v}"
           npx --yes ovsx publish "kin-${version}.vsix" -p "$OVSX_TOKEN" --skip-duplicate
           echo "Published kin-${version}.vsix to Open VSX"
+
+      - name: Verify exact Open VSX version
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_VERSION#v}"
+          for attempt in $(seq 1 20); do
+            published="$(curl --fail --silent --show-error \
+              "https://open-vsx.org/api/firelock/kin-editor/${version}" \
+              | jq -r '.version // empty' || true)"
+            if [ "$published" = "$version" ]; then
+              echo "Open VSX exposes firelock.kin-editor ${version}"
+              exit 0
+            fi
+            echo "Open VSX version ${version} not visible yet (attempt ${attempt}/20)"
+            sleep 15
+          done
+          echo "::error::Open VSX does not expose firelock.kin-editor ${version}"
+          exit 1
+
+      - name: Publish verified GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: kin-*.vsix
