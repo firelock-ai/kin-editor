@@ -1,5 +1,5 @@
 # Kin-editor release policy — the extension's entry in the cross-repo release
-# graph (FIR-1058 / FIR-1066). Read by scripts/release-policy.mjs and the
+# graph. Read by scripts/release-policy.mjs and the
 # release-policy CI job. It makes extension version bumps, marketplace/package
 # publishes, and CLI/daemon/MCP compatibility policy-gated instead of ad hoc.
 #
@@ -64,7 +64,7 @@ dependency_only = [
 ]
 
 [proof_impacting]
-# First-run / editor proof surfaces (FIR-1033, FIR-1093). A change here means
+# First-run / editor proof surfaces. A change here means
 # the first-run acceptance matrix and the live-MCP integration proof must be
 # re-validated before release; `release-policy check-bump` flags it for review.
 surfaces = [
