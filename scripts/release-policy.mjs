@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import TOML from "@iarna/toml";
 
 // release-policy.mjs — kin-editor's entry point into the cross-repo release
-// graph (FIR-1058 / FIR-1066).
+// graph.
 //
 // It reads release.toml (the release-policy metadata) and enforces it:
 //
