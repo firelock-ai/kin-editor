@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Part of Kin](https://img.shields.io/badge/part%20of-Kin-6E56CF.svg)](https://github.com/firelock-ai/kin)
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-007ACC.svg)](https://marketplace.visualstudio.com/items?itemName=firelock.kin-editor)
-[![Open VSX](https://img.shields.io/badge/Open%20VSX-Registry-C160EF.svg)](https://open-vsx.org/extension/Firelock/kin-editor)
+[![Open VSX](https://img.shields.io/badge/Open%20VSX-Registry-C160EF.svg)](https://open-vsx.org/extension/firelock/kin-editor)
 
 `kin-editor` brings Kin's graph into Visual Studio Code: entity explorer,
 natural-language semantic search, trace, go-to-definition, graph-backed review,
@@ -50,7 +50,7 @@ code --install-extension firelock.kin-editor
 ```
 
 The same published extension is available from the
-**[Open VSX Registry](https://open-vsx.org/extension/Firelock/kin-editor)**.
+**[Open VSX Registry](https://open-vsx.org/extension/firelock/kin-editor)**.
 Open VSX is a distribution channel, not a claim that every editor fork is a
 supported client. The documented and tested editor surface here is Visual
 Studio Code 1.85 or newer.

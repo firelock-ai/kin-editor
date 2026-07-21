@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Firelock, LLC
+
+name: Bug Report
+description: Report a bug in the Kin VS Code extension
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please fill out the details below.
+
+  - type: input
+    id: extension-version
+    attributes:
+      label: Extension Version
+      description: Visible in the Extensions panel, or the `version` in package.json
+      placeholder: "0.1.1"
+    validations:
+      required: true
+
+  - type: input
+    id: kin-version
+    attributes:
+      label: Kin CLI Version
+      description: Output of `kin --version`
+      placeholder: "kin 0.2.28"
+    validations:
+      required: true
+
+  - type: input
+    id: vscode-version
+    attributes:
+      label: VS Code Version
+      description: Help > About
+      placeholder: "1.85.0"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS and Architecture
+      placeholder: "macOS 14.3 arm64 / Ubuntu 22.04 x86_64"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps to reproduce the issue
+      placeholder: |
+        1. Run `kin init` and `kin embed` in a workspace
+        2. Open the workspace in VS Code and run Kin: Setup Workspace
+        3. Run Kin: Semantic Search
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant output from the `Kin` Output channel or the Extension Host developer console
+      render: shell
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected Area (if known)
+      options:
+        - Entity Explorer
+        - Semantic Search
+        - Trace
+        - Graph Overview
+        - Review
+        - Rename
+        - Status Bar
+        - MCP Connection
+        - Setup / Onboarding
+        - Unknown
