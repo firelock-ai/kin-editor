@@ -12,7 +12,7 @@
 //
 // Scope note: driving a real VS Code window against a freshly installed CLI on
 // three physical operating systems cannot be simulated hermetically, so that
-// live capture is tracked separately (FIR-1012). What is provable in-process —
+// live capture is tracked separately. What is provable in-process —
 // that each platform's health report parses, that platform-specific states are
 // surfaced honestly, and that the exact user-facing copy matches the M1.5 setup
 // UX — is locked down here so the live pass only has to confirm the screens
