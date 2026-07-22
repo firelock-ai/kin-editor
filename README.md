@@ -1,6 +1,8 @@
 # Kin for Visual Studio Code
 
-**AI writes code. Kin proves the change.**
+> **Software that remembers itself.**
+>
+> Exact context, not more.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Part of Kin](https://img.shields.io/badge/part%20of-Kin-6E56CF.svg)](https://github.com/firelock-ai/kin)
