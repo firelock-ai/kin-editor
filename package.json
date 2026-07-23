@@ -213,7 +213,7 @@
   "devDependencies": {
     "@iarna/toml": "^2.2.5",
     "@types/jest": "^29.5.0",
-    "@types/node": "^20.11.0",
+    "@types/node": "^26.1.1",
     "@types/vscode": "^1.125.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
