@@ -214,7 +214,7 @@
     "@iarna/toml": "^2.2.5",
     "@types/jest": "^29.5.0",
     "@types/node": "^20.11.0",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.125.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "@vscode/vsce": "^3.9.2",
