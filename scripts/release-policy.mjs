@@ -226,7 +226,9 @@ function verify(opts) {
       }
       // The version the extension announces over MCP should match its package
       // version, so the compatibility claim and the artifact stay coherent.
-      if (pkg && clientVersion !== null && version.field && clientVersion !== pkg[version.field]) {
+      if (clientVersion === null) {
+        failures.push(`could not read clientInfo.version from ${mcpClientPath}`);
+      } else if (pkg && version.field && clientVersion !== pkg[version.field]) {
         failures.push(
           `MCP clientInfo.version (${clientVersion}) in ${mcpClientPath} does not match package ${version.field} (${pkg[version.field]})`
         );

@@ -82,6 +82,28 @@ describe("release-policy verify", () => {
     expect(failures).toMatch(/mcp_protocol/);
   });
 
+  it("fails when MCP clientInfo.version cannot be source-checked", () => {
+    const source = readFileSync(join(REPO_ROOT, "src", "mcp-client.ts"), "utf8");
+    const dir = mkdtempSync(join(tmpdir(), "kin-editor-mcp-version-"));
+    const mcpClient = join(dir, "mcp-client.ts");
+    writeFileSync(
+      mcpClient,
+      source.replace(/\n\s*version:\s*"[^"]+",/, ""),
+    );
+    tempFiles.push(dir);
+
+    const { status, stdout } = runPolicy([
+      "verify",
+      "--mcp-client",
+      mcpClient,
+      "--json",
+    ]);
+    expect(status).toBe(1);
+    expect(JSON.parse(stdout).failures.join("\n")).toMatch(
+      /could not read clientInfo\.version/,
+    );
+  });
+
   it("fails when a proof-impacting surface no longer exists", () => {
     const badToml = tempReleaseToml((t) =>
       t.replace('"src/mcp-client.ts",', '"src/does-not-exist.ts",')
