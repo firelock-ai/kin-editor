@@ -421,14 +421,16 @@ describe("automatic release workflow authority", () => {
     expect(tag).toMatch(/permissions:\n {2}checks: read\n {2}contents: read/);
   });
 
-  it("bounds automatic release retries to two reruns", () => {
+  it("bounds automatic release retries before terminal escalation", () => {
     const recovery = readFileSync(
       join(WORKFLOWS, "release-recovery.yml"),
       "utf8",
     );
     expect(recovery).toContain("github.event.workflow_run.run_attempt < 3");
+    expect(recovery).toContain("github.event.workflow_run.run_attempt >= 3");
     expect(recovery).toContain("rerun-failed-jobs");
-    expect(recovery).toContain('.path <<< "$run")" = ".github/workflows/release.yml"');
+    expect(recovery).toContain("release-recovery-policy.mjs validate");
+    expect(recovery).toContain("release-recovery-policy.mjs issue");
     expect(recovery).not.toContain("workflow_dispatch:");
   });
 
