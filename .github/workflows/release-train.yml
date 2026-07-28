@@ -15,7 +15,7 @@ on:
 permissions:
   contents: read
   issues: write
-  pull-requests: write
+  pull-requests: read
 
 concurrency:
   group: kin-editor-release-train
@@ -43,6 +43,8 @@ jobs:
           private-key: ${{ secrets.KIN_RELEASE_BOT_PRIVATE_KEY }}
           owner: firelock-ai
           repositories: kin-editor
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Checkout trusted main
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -318,7 +320,10 @@ jobs:
           node "$policy_dir/release-policy.mjs" verify
           node "$policy_dir/release-policy.mjs" check-bump \
             --base "$MAIN_SHA" \
-            --head HEAD
+            --head HEAD \
+            --head-ref "$BRANCH" \
+            --head-repo "$GITHUB_REPOSITORY" \
+            --base-repo "$GITHUB_REPOSITORY"
           validate_generated_delta "$MAIN_SHA" HEAD
           git push origin "HEAD:refs/heads/${BRANCH}"
           {
@@ -332,7 +337,8 @@ jobs:
         id: pr
         if: steps.plan.outputs.needed == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          LABEL_TOKEN: ${{ github.token }}
           BRANCH: ${{ steps.branch.outputs.branch }}
           TAG: ${{ steps.branch.outputs.tag }}
           BUMP: ${{ steps.plan.outputs.bump }}
@@ -379,7 +385,7 @@ jobs:
             --arg automated "release:automated" \
             --arg bump "release:${BUMP}" \
             '{labels:[$automated,$bump]}' \
-            | gh api \
+            | GH_TOKEN="$LABEL_TOKEN" gh api \
                 --method PUT \
                 "repos/${GITHUB_REPOSITORY}/issues/${pr}/labels" \
                 --input - \

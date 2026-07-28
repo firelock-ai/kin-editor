@@ -78,6 +78,65 @@ function matchesAny(file, patterns) {
   return patterns.some((pattern) => globToRegExp(pattern).test(file));
 }
 
+function parseStableSemver(value, label = "version") {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(
+    String(value ?? ""),
+  );
+  if (!match) throw new Error(`${label} must be an exact stable SemVer`);
+  return match.slice(1).map(Number);
+}
+
+function compareStableSemver(left, right) {
+  const a = parseStableSemver(left, "left version");
+  const b = parseStableSemver(right, "right version");
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+}
+
+function exactSuccessors(version) {
+  const [major, minor, patch] = parseStableSemver(version, "base version");
+  return new Set([
+    `${major}.${minor}.${patch + 1}`,
+    `${major}.${minor + 1}.0`,
+    `${major + 1}.0.0`,
+  ]);
+}
+
+function satisfiesStableRange(version, range) {
+  parseStableSemver(version, "package version");
+  const comparators = String(range ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (comparators.length === 0) {
+    throw new Error("compatibility extension range is empty");
+  }
+  return comparators.every((comparator) => {
+    const match = /^(>=|<=|>|<|=)?((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/.exec(
+      comparator,
+    );
+    if (!match) {
+      throw new Error(
+        `unsupported compatibility extension comparator: ${comparator}`,
+      );
+    }
+    const ordering = compareStableSemver(version, match[2]);
+    switch (match[1] ?? "=") {
+      case ">=":
+        return ordering >= 0;
+      case "<=":
+        return ordering <= 0;
+      case ">":
+        return ordering > 0;
+      case "<":
+        return ordering < 0;
+      case "=":
+        return ordering === 0;
+      default:
+        return false;
+    }
+  });
+}
+
 // Pull the MCP protocol version and announced client version out of the
 // initialize handshake in src/mcp-client.ts source (no execution).
 function extractMcpHandshake(source) {
@@ -129,6 +188,12 @@ function verify(opts) {
     pkg = JSON.parse(pkgText);
     if (version.field && pkg[version.field] === undefined) {
       failures.push(`package field \`${version.field}\` is missing`);
+    } else if (version.field) {
+      try {
+        parseStableSemver(pkg[version.field], `package ${version.field}`);
+      } catch (error) {
+        failures.push(error.message);
+      }
     }
   }
 
@@ -173,11 +238,27 @@ function verify(opts) {
   if (!Array.isArray(matrix) || matrix.length === 0) {
     failures.push("compatibility.matrix must declare at least one row");
   } else {
+    let packageCovered = false;
     matrix.forEach((row, i) => {
       for (const key of ["extension", "kin_cli", "mcp_protocol"]) {
         if (!row[key]) failures.push(`compatibility.matrix[${i}] missing \`${key}\``);
       }
+      if (row.extension && pkg && version.field) {
+        try {
+          packageCovered ||= satisfiesStableRange(
+            pkg[version.field],
+            row.extension,
+          );
+        } catch (error) {
+          failures.push(`compatibility.matrix[${i}] ${error.message}`);
+        }
+      }
     });
+    if (pkg && version.field && !packageCovered) {
+      failures.push(
+        `package ${version.field} ${pkg[version.field]} is outside every compatibility.matrix extension range`,
+      );
+    }
   }
 
   const gate = policy.release_gate ?? {};
@@ -215,6 +296,9 @@ function resolveChanges(opts) {
       changedFiles,
       oldVersion: opts.get("old-version") ?? null,
       newVersion: opts.get("new-version") ?? null,
+      headRef: opts.get("head-ref") ?? null,
+      headRepo: opts.get("head-repo") ?? null,
+      baseRepo: opts.get("base-repo") ?? null,
       resolved: true,
     };
   }
@@ -239,7 +323,15 @@ function resolveChanges(opts) {
     }
     const headPkgText = readFileOrNull(packagePath);
     const newVersion = headPkgText ? JSON.parse(headPkgText).version ?? null : null;
-    return { changedFiles, oldVersion, newVersion, resolved: true };
+    return {
+      changedFiles,
+      oldVersion,
+      newVersion,
+      headRef: opts.get("head-ref") ?? null,
+      headRepo: opts.get("head-repo") ?? null,
+      baseRepo: opts.get("base-repo") ?? null,
+      resolved: true,
+    };
   } catch (error) {
     // Fail open on git-infrastructure problems: this gate must not flake CI on
     // an unresolvable ref. The always-on `verify` job is the hard gate.
@@ -247,7 +339,10 @@ function resolveChanges(opts) {
   }
 }
 
-function classifyBump({ changedFiles, oldVersion, newVersion }, policy) {
+function classifyBump(
+  { changedFiles, oldVersion, newVersion, headRef, headRepo, baseRepo },
+  policy,
+) {
   const gate = policy.release_gate ?? {};
   const proof = (policy.proof_impacting ?? {}).surfaces ?? [];
   const releaseImpacting = changedFiles.filter((f) => matchesAny(f, gate.release_impacting ?? []));
@@ -258,6 +353,50 @@ function classifyBump({ changedFiles, oldVersion, newVersion }, policy) {
 
   const failures = [];
   const notes = [];
+
+  if (versionChanged) {
+    let versionsValid = true;
+    try {
+      parseStableSemver(oldVersion, "base version");
+      parseStableSemver(newVersion, "new version");
+    } catch (error) {
+      failures.push(error.message);
+      versionsValid = false;
+    }
+    if (versionsValid) {
+      if (compareStableSemver(newVersion, oldVersion) <= 0) {
+        failures.push(
+          `version must move strictly forward from ${oldVersion}, not to ${newVersion}`,
+        );
+      } else if (!exactSuccessors(oldVersion).has(newVersion)) {
+        failures.push(
+          `version ${oldVersion} -> ${newVersion} is not an exact patch, minor, or major successor`,
+        );
+      }
+    }
+    if (
+      headRef !== "automation/release-next" ||
+      !headRepo ||
+      !baseRepo ||
+      headRepo !== baseRepo
+    ) {
+      failures.push(
+        "version authority belongs only to the first-party automation/release-next branch",
+      );
+    }
+    const generatedPaths = new Set([
+      "CHANGELOG.md",
+      "package.json",
+      "package-lock.json",
+      "src/mcp-client.ts",
+    ]);
+    const unexpected = changedFiles.filter((file) => !generatedPaths.has(file));
+    if (unexpected.length > 0) {
+      failures.push(
+        `version-moving release PR contains non-generated paths: ${unexpected.join(", ")}`,
+      );
+    }
+  }
 
   if (versionChanged && releaseImpacting.length === 0) {
     failures.push(

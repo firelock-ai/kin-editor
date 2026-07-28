@@ -42,6 +42,7 @@ jobs:
           private-key: ${{ secrets.KIN_RELEASE_BOT_PRIVATE_KEY }}
           owner: firelock-ai
           repositories: kin-editor
+          permission-contents: write
 
       - name: Checkout trusted main
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -74,16 +75,27 @@ jobs:
               "repos/${REPO}/commits/${main_sha}/check-runs?per_page=100"
           )"
           for required in test release-policy; do
-            count="$(
+            latest="$(
               jq -r \
                 --arg name "$required" \
                 '[.check_runs[] |
-                  select(.name == $name and .conclusion == "success")
-                ] | length' \
+                  select(
+                    .name == $name and
+                    .app.id == 15368 and
+                    .app.slug == "github-actions"
+                  )
+                ] |
+                sort_by([.completed_at // .started_at // .created_at, .id]) |
+                last // empty' \
                 <<< "$checks"
             )"
-            if [ "$count" -lt 1 ]; then
-              echo "::notice::current main lacks successful required check ${required}."
+            if [ -z "$latest" ]; then
+              echo "::notice::current main lacks GitHub Actions check ${required}."
+              exit 0
+            fi
+            conclusion="$(jq -r '.conclusion // empty' <<< "$latest")"
+            if [ "$conclusion" != success ]; then
+              echo "::notice::latest GitHub Actions check ${required} is ${conclusion:-incomplete}."
               exit 0
             fi
           done
@@ -96,7 +108,11 @@ jobs:
           if git rev-parse --verify --quiet "${tag}^{commit}" >/dev/null; then
             tagged_sha="$(git rev-parse "${tag}^{commit}")"
             if [ "$tagged_sha" != "$main_sha" ]; then
-              echo "::error::${tag} already resolves to ${tagged_sha}, not current main ${main_sha}."
+              if git merge-base --is-ancestor "$tagged_sha" "$main_sha"; then
+                echo "::notice::${tag} remains the latest released ancestor; release-train reconciliation owns current main drift."
+                exit 0
+              fi
+              echo "::error::${tag} resolves to non-ancestor ${tagged_sha}, not current main ${main_sha}."
               exit 1
             fi
             echo "::notice::${tag} already points at exact current main."

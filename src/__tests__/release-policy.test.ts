@@ -35,6 +35,32 @@ function tempReleaseToml(transform: (text: string) => string): string {
   return path;
 }
 
+function tempVersionAuthorities(version: string): {
+  policy: string;
+  packageJson: string;
+  mcpClient: string;
+} {
+  const original = readFileSync(join(REPO_ROOT, "release.toml"), "utf8");
+  const dir = mkdtempSync(join(tmpdir(), "kin-editor-compat-"));
+  const packageJson = join(dir, "package.json");
+  const mcpClient = join(dir, "mcp-client.ts");
+  const policy = join(dir, "release.toml");
+  writeFileSync(
+    packageJson,
+    `${JSON.stringify({ name: "kin-editor", version }, null, 2)}\n`,
+  );
+  writeFileSync(
+    mcpClient,
+    `protocolVersion: "2024-11-05",\nclientInfo: { name: "kin-editor", version: "${version}" },\n`,
+  );
+  writeFileSync(
+    policy,
+    original.replace('file = "package.json"', `file = "${packageJson}"`),
+  );
+  tempFiles.push(dir);
+  return { policy, packageJson, mcpClient };
+}
+
 afterAll(() => {
   for (const dir of tempFiles) rmSync(dir, { recursive: true, force: true });
 });
@@ -63,6 +89,24 @@ describe("release-policy verify", () => {
     const { status, stdout } = runPolicy(["verify", "--file", badToml, "--json"]);
     expect(status).toBe(1);
     expect(JSON.parse(stdout).failures.join("\n")).toMatch(/does-not-exist\.ts/);
+  });
+
+  it("fails when the package version is outside every compatibility row", () => {
+    const fixture = tempVersionAuthorities("0.2.0");
+    const { status, stdout } = runPolicy([
+      "verify",
+      "--file",
+      fixture.policy,
+      "--package",
+      fixture.packageJson,
+      "--mcp-client",
+      fixture.mcpClient,
+      "--json",
+    ]);
+    expect(status).toBe(1);
+    expect(JSON.parse(stdout).failures.join("\n")).toMatch(
+      /outside every compatibility\.matrix extension range/,
+    );
   });
 });
 
@@ -96,19 +140,94 @@ describe("release-policy check-bump", () => {
     expect(status).toBe(1);
   });
 
-  it("allows a version bump that carries a real extension-source change", () => {
+  it("allows an exact successor carried by the protected generated release branch", () => {
     const { status, stdout } = runPolicy([
       "check-bump",
       "--changed-files",
-      "src/extension.ts,package.json",
+      "src/mcp-client.ts,package.json,package-lock.json,CHANGELOG.md",
       "--old-version",
       "0.1.0",
       "--new-version",
       "0.1.1",
+      "--head-ref",
+      "automation/release-next",
+      "--head-repo",
+      "firelock-ai/kin-editor",
+      "--base-repo",
+      "firelock-ai/kin-editor",
       "--json",
     ]);
     expect(status).toBe(0);
     expect(JSON.parse(stdout).versionChanged).toBe(true);
+  });
+
+  it.each([
+    ["0.1.1", "0.0.1", "strictly forward"],
+    ["0.1.1", "beta", "exact stable SemVer"],
+    ["0.1.1", "999.0.0", "not an exact patch, minor, or major successor"],
+  ])("rejects unsafe version authority %s -> %s", (oldVersion, newVersion, reason) => {
+    const { status, stdout } = runPolicy([
+      "check-bump",
+      "--changed-files",
+      "src/mcp-client.ts,package.json,package-lock.json,CHANGELOG.md",
+      "--old-version",
+      oldVersion,
+      "--new-version",
+      newVersion,
+      "--head-ref",
+      "automation/release-next",
+      "--head-repo",
+      "firelock-ai/kin-editor",
+      "--base-repo",
+      "firelock-ai/kin-editor",
+      "--json",
+    ]);
+    expect(status).toBe(1);
+    expect(JSON.parse(stdout).failures.join("\n")).toMatch(new RegExp(reason));
+  });
+
+  it("rejects version changes outside the first-party protected train", () => {
+    const { status, stdout } = runPolicy([
+      "check-bump",
+      "--changed-files",
+      "src/mcp-client.ts,package.json,package-lock.json,CHANGELOG.md",
+      "--old-version",
+      "0.1.1",
+      "--new-version",
+      "0.1.2",
+      "--head-ref",
+      "feature/manual-version",
+      "--head-repo",
+      "firelock-ai/kin-editor",
+      "--base-repo",
+      "firelock-ai/kin-editor",
+      "--json",
+    ]);
+    expect(status).toBe(1);
+    expect(JSON.parse(stdout).failures.join("\n")).toMatch(
+      /version authority belongs only/,
+    );
+  });
+
+  it("rejects non-generated paths in the protected train", () => {
+    const { status, stdout } = runPolicy([
+      "check-bump",
+      "--changed-files",
+      "src/extension.ts,src/mcp-client.ts,package.json,package-lock.json,CHANGELOG.md",
+      "--old-version",
+      "0.1.1",
+      "--new-version",
+      "0.1.2",
+      "--head-ref",
+      "automation/release-next",
+      "--head-repo",
+      "firelock-ai/kin-editor",
+      "--base-repo",
+      "firelock-ai/kin-editor",
+      "--json",
+    ]);
+    expect(status).toBe(1);
+    expect(JSON.parse(stdout).failures.join("\n")).toMatch(/non-generated paths/);
   });
 
   it("allows a dependency-only change with no version bump (ordinary hygiene)", () => {
@@ -209,6 +328,9 @@ describe("automatic release workflow authority", () => {
     expect(train).toContain("Neutralize generated release bytes");
     expect(train).toContain("Signed-off-by: kin-release-bot[bot]");
     expect(train).toContain("--match-head-commit");
+    expect(train).toContain("permission-contents: write");
+    expect(train).toContain("permission-pull-requests: write");
+    expect(train).toContain("GH_TOKEN: ${{ steps.app-token.outputs.token }}");
     expect(train).not.toContain("workflow_dispatch:");
     expect(train).not.toContain("workflows: write");
     expect(train).not.toMatch(/\bgit merge(?:\s|\\)/);
@@ -222,10 +344,14 @@ describe("automatic release workflow authority", () => {
     expect(tag).toContain("repositories: kin-editor");
     expect(tag).toContain("commits/${main_sha}/check-runs");
     expect(tag).toContain("for required in test release-policy");
+    expect(tag).toContain(".app.id == 15368");
+    expect(tag).toContain('.app.slug == "github-actions"');
+    expect(tag).toContain("permission-contents: write");
+    expect(tag).toContain("release-train reconciliation owns current main drift");
     expect(tag).toContain('"repos/${REPO}/git/tags"');
     expect(tag).toContain('"repos/${REPO}/git/refs"');
     expect(tag).not.toContain("workflow_dispatch:");
-    expect(tag).not.toContain("contents: write");
+    expect(tag).toMatch(/permissions:\n {2}checks: read\n {2}contents: read/);
   });
 
   it("bounds automatic release retries to two reruns", () => {
