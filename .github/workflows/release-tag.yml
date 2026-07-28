@@ -51,6 +51,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Set up trusted Node runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install trusted release-policy dependencies
+        run: npm ci
+
       - name: Reconcile the exact reviewed main release
         env:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}

@@ -406,6 +406,14 @@ describe("automatic release workflow authority", () => {
     expect(tag).toContain(".app.id == 15368");
     expect(tag).toContain('.app.slug == "github-actions"');
     expect(tag).toContain("permission-contents: write");
+    expect(tag).toContain(
+      "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+    );
+    expect(tag).toContain("Install trusted release-policy dependencies");
+    expect(tag).toContain("run: npm ci");
+    expect(tag.indexOf("run: npm ci")).toBeLessThan(
+      tag.indexOf("node scripts/release-policy.mjs verify"),
+    );
     expect(tag).toContain("release-train reconciliation owns current main drift");
     expect(tag).toContain('"repos/${REPO}/git/tags"');
     expect(tag).toContain('"repos/${REPO}/git/refs"');
