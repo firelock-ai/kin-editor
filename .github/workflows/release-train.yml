@@ -53,6 +53,15 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
+      - name: Set up trusted Node runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install trusted release-policy dependencies
+        run: npm ci
+
       - name: Ensure release intent labels exist
         env:
           GH_TOKEN: ${{ github.token }}
@@ -233,7 +242,9 @@ jobs:
           git config user.email "kin-release-bot[bot]@users.noreply.github.com"
           policy_dir="$RUNNER_TEMP/release-policy"
           mkdir -p "$policy_dir"
-          for policy in scripts/prepare-release.mjs scripts/release-policy.mjs; do
+          for policy in \
+            scripts/prepare-release.mjs \
+            scripts/mcp-version-authority.mjs; do
             git show "${MAIN_SHA}:${policy}" > "${policy_dir}/${policy##*/}"
           done
 
@@ -317,8 +328,8 @@ jobs:
           if ! git diff --cached --quiet; then
             git commit --signoff -m "Release Kin Editor ${tag}"
           fi
-          node "$policy_dir/release-policy.mjs" verify
-          node "$policy_dir/release-policy.mjs" check-bump \
+          node scripts/release-policy.mjs verify
+          node scripts/release-policy.mjs check-bump \
             --base "$MAIN_SHA" \
             --head HEAD \
             --head-ref "$BRANCH" \

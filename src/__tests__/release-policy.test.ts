@@ -51,7 +51,18 @@ function tempVersionAuthorities(version: string): {
   );
   writeFileSync(
     mcpClient,
-    `protocolVersion: "2024-11-05",\nclientInfo: { name: "kin-editor", version: "${version}" },\n`,
+    `this.sendRequest(
+  "initialize",
+  {
+    protocolVersion: "2024-11-05",
+    capabilities: {},
+    clientInfo: {
+      name: "kin-editor",
+      version: "${version}",
+    },
+  },
+);
+`,
   );
   writeFileSync(
     policy,
@@ -89,6 +100,28 @@ describe("release-policy verify", () => {
     writeFileSync(
       mcpClient,
       source.replace(/\n\s*version:\s*"[^"]+",/, ""),
+    );
+    tempFiles.push(dir);
+
+    const { status, stdout } = runPolicy([
+      "verify",
+      "--mcp-client",
+      mcpClient,
+      "--json",
+    ]);
+    expect(status).toBe(1);
+    expect(JSON.parse(stdout).failures.join("\n")).toMatch(
+      /could not read clientInfo\.version/,
+    );
+  });
+
+  it("does not borrow a later decoy version when handshake authority is missing", () => {
+    const source = readFileSync(join(REPO_ROOT, "src", "mcp-client.ts"), "utf8");
+    const dir = mkdtempSync(join(tmpdir(), "kin-editor-mcp-decoy-"));
+    const mcpClient = join(dir, "mcp-client.ts");
+    writeFileSync(
+      mcpClient,
+      `${source.replace(/\n\s*version:\s*"[^"]+",/, "")}\nconst unrelated = { version: "0.1.1" };\n`,
     );
     tempFiles.push(dir);
 
@@ -353,6 +386,10 @@ describe("automatic release workflow authority", () => {
     expect(train).toContain("permission-contents: write");
     expect(train).toContain("permission-pull-requests: write");
     expect(train).toContain("GH_TOKEN: ${{ steps.app-token.outputs.token }}");
+    expect(train).toContain("Install trusted release-policy dependencies");
+    expect(train).toContain("run: npm ci");
+    expect(train).toContain("scripts/mcp-version-authority.mjs");
+    expect(train).not.toContain('scripts/release-policy.mjs; do');
     expect(train).not.toContain("workflow_dispatch:");
     expect(train).not.toContain("workflows: write");
     expect(train).not.toMatch(/\bgit merge(?:\s|\\)/);

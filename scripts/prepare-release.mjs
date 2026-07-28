@@ -2,6 +2,7 @@
 
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
+import { replaceMcpClientVersion } from "./mcp-version-authority.mjs";
 
 function parseArgs(argv) {
   const args = new Map();
@@ -64,19 +65,6 @@ function releaseSubjects(baseTag, sourceRef) {
     .map((subject) => subject.trim())
     .filter(Boolean)
     .filter((subject) => !/^Release Kin Editor v?\d+\.\d+\.\d+$/.test(subject));
-}
-
-function replaceClientVersion(source, expected, next) {
-  const pattern =
-    /(clientInfo:\s*\{\s*name:\s*"kin-editor",\s*version:\s*")([^"]+)(")/m;
-  const match = source.match(pattern);
-  if (!match) throw new Error("could not locate the Kin Editor MCP client version");
-  if (match[2] !== expected) {
-    throw new Error(
-      `MCP client version ${match[2]} does not match package version ${expected}`,
-    );
-  }
-  return source.replace(pattern, `$1${next}$3`);
 }
 
 function prependChangelog(changelog, version, subjects, date) {
@@ -146,7 +134,11 @@ function main() {
   const clientPath = "src/mcp-client.ts";
   fs.writeFileSync(
     clientPath,
-    replaceClientVersion(fs.readFileSync(clientPath, "utf8"), baseVersion, version),
+    replaceMcpClientVersion(
+      fs.readFileSync(clientPath, "utf8"),
+      baseVersion,
+      version,
+    ),
   );
   fs.writeFileSync(
     "CHANGELOG.md",

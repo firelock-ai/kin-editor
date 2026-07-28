@@ -16,6 +16,11 @@ import { spawnSync } from "child_process";
 
 const REPO_ROOT = resolve(__dirname, "..", "..");
 const SCRIPT = join(REPO_ROOT, "scripts", "prepare-release.mjs");
+const MCP_VERSION_AUTHORITY = join(
+  REPO_ROOT,
+  "scripts",
+  "mcp-version-authority.mjs",
+);
 const tempDirs: string[] = [];
 
 function git(cwd: string, ...args: string[]): void {
@@ -29,6 +34,7 @@ function fixture(): string {
   const dir = mkdtempSync(join(tmpdir(), "kin-editor-release-"));
   tempDirs.push(dir);
   cpSync(SCRIPT, join(dir, "prepare-release.mjs"));
+  cpSync(MCP_VERSION_AUTHORITY, join(dir, "mcp-version-authority.mjs"));
   chmodSync(join(dir, "prepare-release.mjs"), 0o755);
   writeFileSync(
     join(dir, "package.json"),
@@ -50,7 +56,18 @@ function fixture(): string {
   mkdirSync(join(dir, "src"));
   writeFileSync(
     join(dir, "src", "mcp-client.ts"),
-    'clientInfo: {\n  name: "kin-editor",\n  version: "0.1.1",\n},\n',
+    `this.sendRequest(
+  "initialize",
+  {
+    protocolVersion: "2024-11-05",
+    capabilities: {},
+    clientInfo: {
+      name: "kin-editor",
+      version: "0.1.1",
+    },
+  },
+);
+`,
   );
   git(dir, "init", "-q");
   git(dir, "config", "user.name", "Kin Test");

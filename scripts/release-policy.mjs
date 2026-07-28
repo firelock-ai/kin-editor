@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import TOML from "@iarna/toml";
+import { extractMcpHandshake } from "./mcp-version-authority.mjs";
 
 // release-policy.mjs — kin-editor's entry point into the cross-repo release
 // graph.
@@ -135,17 +136,6 @@ function satisfiesStableRange(version, range) {
         return false;
     }
   });
-}
-
-// Pull the MCP protocol version and announced client version out of the
-// initialize handshake in src/mcp-client.ts source (no execution).
-function extractMcpHandshake(source) {
-  const protocol = source.match(/protocolVersion:\s*"([^"]+)"/);
-  const clientInfo = source.match(/clientInfo:\s*\{[\s\S]*?version:\s*"([^"]+)"/);
-  return {
-    protocolVersion: protocol ? protocol[1] : null,
-    clientVersion: clientInfo ? clientInfo[1] : null,
-  };
 }
 
 function loadPolicy(path) {
