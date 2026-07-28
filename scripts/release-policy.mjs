@@ -339,6 +339,34 @@ function runProofImpact(opts) {
   process.exitCode = 0;
 }
 
+function runReleaseNeeded(opts) {
+  const policy = loadPolicy(opts.get("file") ?? "release.toml");
+  const changes = resolveChanges(opts);
+  if (!changes.resolved) {
+    const detail = changes.error ? `: ${changes.error}` : "";
+    console.error(`could not resolve release drift${detail}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const result = classifyBump(changes, policy);
+  const payload = {
+    needed: result.releaseImpacting.length > 0,
+    releaseImpacting: result.releaseImpacting,
+    proofImpacting: result.proofImpacting,
+    changedFiles: changes.changedFiles,
+  };
+  if (opts.get("json") === "true") {
+    console.log(JSON.stringify(payload, null, 2));
+  } else {
+    console.log("kin-editor release-policy release-needed");
+    console.log(`  release needed    : ${payload.needed}`);
+    console.log(`  release-impacting: ${payload.releaseImpacting.join(", ") || "(none)"}`);
+    console.log(`  proof-impacting  : ${payload.proofImpacting.join(", ") || "(none)"}`);
+  }
+  process.exitCode = 0;
+}
+
 function main() {
   const [sub, ...rest] = process.argv.slice(2);
   const opts = parseArgs(rest);
@@ -349,8 +377,12 @@ function main() {
       return runCheckBump(opts);
     case "proof-impact":
       return runProofImpact(opts);
+    case "release-needed":
+      return runReleaseNeeded(opts);
     default:
-      console.error(`usage: release-policy.mjs <verify|check-bump|proof-impact> [flags]`);
+      console.error(
+        "usage: release-policy.mjs <verify|check-bump|proof-impact|release-needed> [flags]"
+      );
       process.exitCode = 2;
   }
 }

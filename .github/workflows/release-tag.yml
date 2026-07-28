@@ -1,0 +1,169 @@
+# Copyright 2026 Firelock LLC
+# SPDX-License-Identifier: Apache-2.0
+
+name: Release Tag
+
+on:
+  schedule:
+    - cron: "16,31,46,1 * * * *"
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  repository_dispatch:
+    types: [release-tag]
+
+permissions:
+  checks: read
+  contents: read
+
+concurrency:
+  group: kin-editor-release-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Mint release tag
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.conclusion == 'success'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release-tag
+    steps:
+      - name: Mint repository-scoped release token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v2.2.1
+        with:
+          app-id: ${{ secrets.KIN_RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.KIN_RELEASE_BOT_PRIVATE_KEY }}
+          owner: firelock-ai
+          repositories: kin-editor
+
+      - name: Checkout trusted main
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Reconcile the exact reviewed main release
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git fetch origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/tags/*:refs/tags/*"
+          main_sha="$(git rev-parse refs/remotes/origin/main)"
+          [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
+          if [ "$GITHUB_EVENT_NAME" = workflow_run ] &&
+             [ "${{ github.event.workflow_run.head_sha }}" != "$main_sha" ]; then
+            echo "::notice::the completed CI run is not current main; a later reconcile owns it."
+            exit 0
+          fi
+
+          checks="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              "repos/${REPO}/commits/${main_sha}/check-runs?per_page=100"
+          )"
+          for required in test release-policy; do
+            count="$(
+              jq -r \
+                --arg name "$required" \
+                '[.check_runs[] |
+                  select(.name == $name and .conclusion == "success")
+                ] | length' \
+                <<< "$checks"
+            )"
+            if [ "$count" -lt 1 ]; then
+              echo "::notice::current main lacks successful required check ${required}."
+              exit 0
+            fi
+          done
+
+          version="$(jq -er .version package.json)"
+          tag="v${version}"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          node scripts/release-policy.mjs verify
+
+          if git rev-parse --verify --quiet "${tag}^{commit}" >/dev/null; then
+            tagged_sha="$(git rev-parse "${tag}^{commit}")"
+            if [ "$tagged_sha" != "$main_sha" ]; then
+              echo "::error::${tag} already resolves to ${tagged_sha}, not current main ${main_sha}."
+              exit 1
+            fi
+            echo "::notice::${tag} already points at exact current main."
+            exit 0
+          fi
+
+          latest_tag="$(gh api "repos/${REPO}/releases/latest" --jq .tag_name)"
+          highest_tag="$(
+            git tag --list 'v*.*.*' --sort=-v:refname \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | head -1
+          )"
+          if [ -z "$highest_tag" ] || [ "$highest_tag" != "$latest_tag" ]; then
+            echo "::notice::highest stable tag and GitHub Latest differ; release recovery owns this state."
+            exit 0
+          fi
+          CURRENT_VERSION="$version" LATEST_VERSION="${latest_tag#v}" node <<'NODE'
+          const parse = (value) => {
+            if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value)) {
+              throw new Error(`invalid stable SemVer: ${value}`);
+            }
+            return value.split(".").map(Number);
+          };
+          const current = parse(process.env.CURRENT_VERSION);
+          const latest = parse(process.env.LATEST_VERSION);
+          const cmp =
+            current[0] - latest[0] ||
+            current[1] - latest[1] ||
+            current[2] - latest[2];
+          if (cmp <= 0) {
+            throw new Error(
+              `current version ${process.env.CURRENT_VERSION} does not advance ${process.env.LATEST_VERSION}`,
+            );
+          }
+          NODE
+
+          tag_object="$(
+            jq -n \
+              --arg tag "$tag" \
+              --arg message "Kin Editor ${tag}" \
+              --arg object "$main_sha" \
+              '{
+                tag:$tag,
+                message:$message,
+                object:$object,
+                type:"commit",
+                tagger:{
+                  name:"kin-release-bot[bot]",
+                  email:"kin-release-bot[bot]@users.noreply.github.com"
+                }
+              }' \
+              | GH_TOKEN="$APP_TOKEN" gh api \
+                  --method POST \
+                  "repos/${REPO}/git/tags" \
+                  --input - \
+                  --jq .sha
+          )"
+          [[ "$tag_object" =~ ^[0-9a-f]{40}$ ]]
+          jq -n \
+            --arg ref "refs/tags/${tag}" \
+            --arg sha "$tag_object" \
+            '{ref:$ref,sha:$sha}' \
+            | GH_TOKEN="$APP_TOKEN" gh api \
+                --method POST \
+                "repos/${REPO}/git/refs" \
+                --input - \
+                >/dev/null
+          git fetch origin "+refs/tags/${tag}:refs/tags/${tag}"
+          test "$(git rev-parse "${tag}^{commit}")" = "$main_sha"
+          echo "Created ${tag} at exact reviewed main ${main_sha}."

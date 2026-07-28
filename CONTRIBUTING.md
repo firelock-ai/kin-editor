@@ -115,6 +115,20 @@ Public Git history is part of the product, so keep it clean and reviewable:
 - If your change is user-facing, briefly describe it in the PR body so
   reviewers understand the before/after behavior.
 
+## Releases
+
+Do not bump the extension version or create release tags in an ordinary pull
+request. After a release-impacting change reaches `main`, the protected release
+train opens or updates one generated release PR, selects a patch by default,
+and merges it only after the normal required checks pass. A maintainer may add
+`release:minor` or `release:major` to the product PR when that larger SemVer
+change is intentional.
+
+The resulting reviewed `main` commit is tagged automatically and published to
+the Visual Studio Marketplace, Open VSX, and GitHub Releases. Version tags are
+immutable. If a published build is bad, recover with a fixed higher version;
+do not move or replace the existing tag.
+
 ## Reporting Issues
 
 File issues on [firelock-ai/kin-editor](https://github.com/firelock-ai/kin-editor/issues)

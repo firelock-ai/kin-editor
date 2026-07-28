@@ -13,6 +13,7 @@ import { join, resolve } from "path";
 
 const REPO_ROOT = resolve(__dirname, "..", "..");
 const SCRIPT = join(REPO_ROOT, "scripts", "release-policy.mjs");
+const WORKFLOWS = join(REPO_ROOT, ".github", "workflows");
 
 jest.setTimeout(20_000);
 
@@ -151,5 +152,99 @@ describe("release-policy proof-impact", () => {
       "--json",
     ]);
     expect(JSON.parse(stdout).proofImpacting).toEqual([]);
+  });
+});
+
+describe("release-policy release-needed", () => {
+  it("selects release-impacting drift", () => {
+    const { status, stdout } = runPolicy([
+      "release-needed",
+      "--changed-files",
+      "README.md,.github/workflows/ci.yml",
+      "--old-version",
+      "0.1.1",
+      "--new-version",
+      "0.1.1",
+      "--json",
+    ]);
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({
+      needed: true,
+      releaseImpacting: ["README.md"],
+    });
+  });
+
+  it("does not release dependency and workflow hygiene", () => {
+    const { status, stdout } = runPolicy([
+      "release-needed",
+      "--changed-files",
+      "package.json,package-lock.json,.github/workflows/ci.yml",
+      "--old-version",
+      "0.1.1",
+      "--new-version",
+      "0.1.1",
+      "--json",
+    ]);
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({
+      needed: false,
+      releaseImpacting: [],
+    });
+  });
+
+  it("fails closed when release drift cannot be resolved", () => {
+    const { status, stderr } = runPolicy(["release-needed"]);
+    expect(status).toBe(1);
+    expect(stderr).toMatch(/could not resolve release drift/);
+  });
+});
+
+describe("automatic release workflow authority", () => {
+  it("keeps the coalescing writer Contents-only across workflow drift", () => {
+    const train = readFileSync(join(WORKFLOWS, "release-train.yml"), "utf8");
+    expect(train).toContain("environment: release-tag");
+    expect(train).toContain('"repos/${GITHUB_REPOSITORY}/merges"');
+    expect(train).toContain('"repos/${GITHUB_REPOSITORY}/git/refs"');
+    expect(train).toContain("git merge-base --is-ancestor");
+    expect(train).toContain("Neutralize generated release bytes");
+    expect(train).toContain("Signed-off-by: kin-release-bot[bot]");
+    expect(train).toContain("--match-head-commit");
+    expect(train).not.toContain("workflow_dispatch:");
+    expect(train).not.toContain("workflows: write");
+    expect(train).not.toMatch(/\bgit merge(?:\s|\\)/);
+    expect(train).not.toMatch(/git push (?:--force|-f)\b/);
+    expect(train).not.toMatch(/git push origin :/);
+  });
+
+  it("tags only exact required-check-green main through the release environment", () => {
+    const tag = readFileSync(join(WORKFLOWS, "release-tag.yml"), "utf8");
+    expect(tag).toContain("environment: release-tag");
+    expect(tag).toContain("repositories: kin-editor");
+    expect(tag).toContain("commits/${main_sha}/check-runs");
+    expect(tag).toContain("for required in test release-policy");
+    expect(tag).toContain('"repos/${REPO}/git/tags"');
+    expect(tag).toContain('"repos/${REPO}/git/refs"');
+    expect(tag).not.toContain("workflow_dispatch:");
+    expect(tag).not.toContain("contents: write");
+  });
+
+  it("bounds automatic release retries to two reruns", () => {
+    const recovery = readFileSync(
+      join(WORKFLOWS, "release-recovery.yml"),
+      "utf8",
+    );
+    expect(recovery).toContain("github.event.workflow_run.run_attempt < 3");
+    expect(recovery).toContain("rerun-failed-jobs");
+    expect(recovery).toContain('.path <<< "$run")" = ".github/workflows/release.yml"');
+    expect(recovery).not.toContain("workflow_dispatch:");
+  });
+
+  it("exposes Marketplace credentials only on the protected publish job", () => {
+    const release = readFileSync(join(WORKFLOWS, "release.yml"), "utf8");
+    expect(release).toMatch(/permissions:\n {2}contents: read/);
+    expect(release).toContain("environment: marketplace-publish");
+    expect(release).toMatch(
+      /release:[\s\S]*permissions:\n {6}contents: write/,
+    );
   });
 });
