@@ -62,7 +62,7 @@ jobs:
       - name: Install trusted release-policy dependencies
         run: npm ci
 
-      - name: Ensure release intent labels exist
+      - name: Ensure descriptive release labels exist
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -81,7 +81,7 @@ jobs:
             gh label create "release:${bump}" \
               --repo "$GITHUB_REPOSITORY" \
               --color "$color" \
-              --description "Request the next ${bump} Kin Editor release" \
+              --description "Describes the immutable ${bump} intent selected for the next Kin Editor release" \
               --force
           done
 
@@ -90,7 +90,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          OVERRIDE_BUMP: ${{ github.event.client_payload.bump }}
         run: |
           set -euo pipefail
           git fetch origin \
@@ -132,64 +131,16 @@ jobs:
             exit 0
           fi
 
-          bump="patch"
-          raise_bump() {
-            case "$1" in
-              major) bump="major" ;;
-              minor) [ "$bump" = major ] || bump="minor" ;;
-              patch) ;;
-              *) echo "::error::unsupported release bump: $1"; exit 1 ;;
-            esac
-          }
-          while IFS= read -r commit; do
-            labels=""
-            resolved=false
-            for attempt in 1 2 3 4; do
-              if labels="$(
-                gh api "repos/${REPO}/commits/${commit}/pulls" \
-                  --jq '.[].labels[].name'
-              )"; then
-                resolved=true
-                break
-              fi
-              sleep $(( attempt * 2 ))
-            done
-            if [ "$resolved" != true ]; then
-              echo "::error::could not resolve release labels for ${commit}"
-              exit 1
-            fi
-            if grep -qx 'release:major' <<< "$labels"; then
-              raise_bump major
-              break
-            elif grep -qx 'release:minor' <<< "$labels"; then
-              raise_bump minor
-            fi
-          done < <(git rev-list --first-parent --reverse "${tag}..${main_sha}")
-
-          case "${OVERRIDE_BUMP:-}" in
-            "") ;;
-            patch|minor|major) raise_bump "$OVERRIDE_BUMP" ;;
-            *) echo "::error::release-reconcile bump must be patch, minor, or major"; exit 1 ;;
-          esac
-
-          train_labels="$(
-            gh pr list \
-              --repo "$REPO" \
-              --state open \
-              --head automation/release-next \
-              --json labels,headRepository,headRepositoryOwner \
-              --jq '.[] |
-                select(
-                  .headRepositoryOwner.login == "firelock-ai" and
-                  .headRepository.nameWithOwner == "firelock-ai/kin-editor"
-                ) |
-                .labels[].name'
+          intent="$(
+            node scripts/resolve-release-intent.mjs \
+              --base-ref "$tag" \
+              --head-ref refs/remotes/origin/main \
+              | jq -er .intent
           )"
-          if grep -qx 'release:major' <<< "$train_labels"; then
-            raise_bump major
-          elif grep -qx 'release:minor' <<< "$train_labels"; then
-            raise_bump minor
-          fi
+          case "$intent" in
+            patch|minor|major) bump="$intent" ;;
+            *) echo "::error::unsupported immutable release intent: $intent"; exit 1 ;;
+          esac
 
           {
             echo "needed=true"
@@ -376,7 +327,7 @@ jobs:
               --base main \
               --head "$BRANCH" \
               --title "Release Kin Editor ${TAG}" \
-              --body "Automated coalescing release PR. Patch is the default; reviewed release labels may raise SemVer. Normal required checks and protected auto-merge remain authoritative." \
+              --body "Automated coalescing release PR. Patch is the default; immutable Kin-Release-Intent trailers on landed first-parent commits may raise SemVer. Labels are descriptive only. Normal required checks and protected auto-merge remain authoritative." \
               >/dev/null
             pr="$(
               gh pr list \
@@ -391,7 +342,7 @@ jobs:
           gh pr edit "$pr" \
             --repo "$GITHUB_REPOSITORY" \
             --title "Release Kin Editor ${TAG}" \
-            --body "Automated coalescing release PR. Patch is the default; reviewed release labels may raise SemVer. Normal required checks and protected auto-merge remain authoritative."
+            --body "Automated coalescing release PR. Patch is the default; immutable Kin-Release-Intent trailers on landed first-parent commits may raise SemVer. Labels are descriptive only. Normal required checks and protected auto-merge remain authoritative."
           jq -n \
             --arg automated "release:automated" \
             --arg bump "release:${BUMP}" \

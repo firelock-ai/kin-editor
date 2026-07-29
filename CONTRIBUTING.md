@@ -120,9 +120,19 @@ Public Git history is part of the product, so keep it clean and reviewable:
 Do not bump the extension version or create release tags in an ordinary pull
 request. After a release-impacting change reaches `main`, the protected release
 train opens or updates one generated release PR, selects a patch by default,
-and merges it only after the normal required checks pass. A maintainer may add
-`release:minor` or `release:major` to the product PR when that larger SemVer
-change is intentional.
+and merges it only after the normal required checks pass. When a larger SemVer
+change is intentional, end the product PR body with exactly one immutable
+trailer:
+
+```
+Kin-Release-Intent: minor
+```
+
+Use `major` for a major release. The repository preserves the PR body in its
+squash commit, and the train scans only landed first-parent commit messages
+since the last immutable tag. Mutable PR and release-train labels are
+descriptive metadata only and cannot select or downgrade automatic release
+intent.
 
 The resulting reviewed `main` commit is tagged automatically and published to
 the Visual Studio Marketplace, Open VSX, and GitHub Releases. Version tags are
