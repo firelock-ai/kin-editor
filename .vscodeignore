@@ -12,6 +12,7 @@ CLAUDE.md
 SECURITY.md
 package-lock.json
 resources/icon.svg
+brand/**
 kin-*.vsix
 node_modules/**
 **/*.map
