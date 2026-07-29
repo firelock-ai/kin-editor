@@ -141,9 +141,11 @@ the exact checked first-parent commit that introduced the prepared version;
 later `main` drift stays in the next release train. Failed generated-PR checks
 are classified and recovered before the controller may coalesce `main` or
 rewrite that exact release-PR head. They receive two bounded automatic reruns
-before one exact-head terminal issue is opened. Version tags are immutable. If
-a published build is bad, recover with a fixed higher version; do not move or
-replace the existing tag.
+before one exact-head terminal issue is opened. A PR whose checks do not start
+receives one bounded activation commit; a second activation state is terminal
+instead of creating another head. Version tags are immutable. If a published
+build is bad, recover with a fixed higher version; do not move or replace the
+existing tag.
 
 ## Reporting Issues
 

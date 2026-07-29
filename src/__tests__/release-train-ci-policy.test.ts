@@ -90,6 +90,13 @@ describe("release-train CI recovery policy", () => {
     expect(TRAIN_WORKFLOW).toContain(
       "if: steps.recovery.outputs.handled != 'true'",
     );
+    expect(TRAIN_WORKFLOW).toContain("activation-terminal)");
+    expect(TRAIN_WORKFLOW).toContain(
+      "Automatic activation commits exhausted: `1`",
+    );
+    expect(TRAIN_WORKFLOW).toContain(
+      'activation_subject="$(jq -er .activationSubject <<< "$fresh")"',
+    );
   });
 
   it("enforces squash-only PR-body intent before reconciliation", () => {

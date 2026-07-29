@@ -19,6 +19,7 @@ function pull(overrides = {}) {
     isCrossRepository: false,
     headRepository: { nameWithOwner: REPOSITORY },
     headRepositoryOwner: { login: "firelock-ai" },
+    headCommitSubject: "Release Kin Editor v0.1.2",
     mergeStateStatus: "CLEAN",
     ...overrides,
   };
@@ -103,15 +104,37 @@ describe("release-train mutation preflight", () => {
     expect(JSON.parse(result.stdout).action).toBe("wait");
   });
 
-  it("permits activation only when exact-head CI is absent or action-required", () => {
+  it("handles activation without permitting release-branch coalescing", () => {
     for (const workflowRuns of [[], [run(1, "action_required")]]) {
       const result = preflight([pull()], workflowRuns);
       expect(result.status).toBe(0);
       expect(JSON.parse(result.stdout)).toMatchObject({
-        action: "proceed",
-        reason: "exact-head-ci-needs-activation",
+        action: "activate",
+        activationSubject:
+          "Activate protected checks for the automated release PR",
+        headSha: HEAD,
+        prNumber: 40,
       });
     }
+  });
+
+  it("makes a second consecutive activation state terminal", () => {
+    const result = preflight(
+      [
+        pull({
+          headCommitSubject:
+            "Activate protected checks for the automated release PR",
+        }),
+      ],
+      [],
+    );
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      action: "activation-terminal",
+      reason: "bounded-activation-commit-exhausted",
+      headSha: HEAD,
+      prNumber: 40,
+    });
   });
 
   it("coalesces main only after the current exact head has succeeded", () => {

@@ -86,6 +86,19 @@ jobs:
                 --head "$BRANCH" \
                 --json number,baseRefName,headRefName,headRefOid,isCrossRepository,headRepository,headRepositoryOwner,mergeStateStatus
             )"
+            if [ "$(jq -r length <<< "$pulls")" = 1 ]; then
+              local head subject
+              head="$(jq -er '.[0].headRefOid' <<< "$pulls")"
+              subject="$(
+                GH_TOKEN="$APP_TOKEN" gh api \
+                  "repos/${GITHUB_REPOSITORY}/commits/${head}" \
+                  --jq '.commit.message | split("\n")[0]'
+              )"
+              pulls="$(
+                jq -c --arg subject "$subject" \
+                  '.[0].headCommitSubject = $subject' <<< "$pulls"
+              )"
+            fi
             runs="$(
               GH_TOKEN="$ACTIONS_TOKEN" gh api \
                 "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=pull_request&per_page=30"
@@ -101,6 +114,49 @@ jobs:
               --head-branch "$BRANCH" \
               --base-branch main
           }
+          upsert_terminal_issue() {
+            local issue="$1"
+            local marker label existing number
+            marker="$(jq -er .marker <<< "$issue")"
+            label="$(jq -er .label <<< "$issue")"
+            GH_TOKEN="$ACTIONS_TOKEN" gh label create "$label" \
+              --repo "$GITHUB_REPOSITORY" \
+              --color B60205 \
+              --description "Automatic release exhausted its bounded recovery" \
+              --force
+            existing="$(
+              GH_TOKEN="$ACTIONS_TOKEN" gh api --method GET --paginate \
+                "repos/${GITHUB_REPOSITORY}/issues" \
+                -f state=all -f per_page=100 --slurp \
+                | jq -c --arg marker "$marker" '
+                    [flatten[] |
+                      select(.user.login == "github-actions[bot]" and
+                             (has("pull_request") | not) and
+                             ((.body // "") | contains($marker)))]
+                  '
+            )"
+            case "$(jq -r length <<< "$existing")" in
+              0)
+                jq -c --arg label "$label" \
+                  '{title,body,labels:[$label]}' <<< "$issue" \
+                  | GH_TOKEN="$ACTIONS_TOKEN" gh api --method POST \
+                      "repos/${GITHUB_REPOSITORY}/issues" --input - \
+                      >/dev/null
+                ;;
+              1)
+                number="$(jq -er '.[0].number' <<< "$existing")"
+                jq -c --arg label "$label" \
+                  '{title,body,state:"open",labels:[$label]}' <<< "$issue" \
+                  | GH_TOKEN="$ACTIONS_TOKEN" gh api --method PATCH \
+                      "repos/${GITHUB_REPOSITORY}/issues/${number}" --input - \
+                      >/dev/null
+                ;;
+              *)
+                echo "::error::multiple terminal release-PR issues carry ${marker}"
+                exit 1
+                ;;
+            esac
+          }
           state="$(snapshot)"
           decision="$(classify <<< "$state")"
           action="$(jq -er .action <<< "$decision")"
@@ -115,6 +171,49 @@ jobs:
           pr="$(jq -er .prNumber <<< "$decision")"
           [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
           case "$action" in
+            activation-terminal)
+              fresh_state="$(snapshot)"
+              fresh="$(classify <<< "$fresh_state")"
+              if [ "$(jq -er .action <<< "$fresh")" != activation-terminal ] ||
+                 [ "$(jq -er .headSha <<< "$fresh")" != "$head_sha" ] ||
+                 [ "$(jq -er .prNumber <<< "$fresh")" != "$pr" ]; then
+                echo "::notice::exact release-PR state changed before activation-terminal reconciliation."
+                exit 0
+              fi
+              marker="<!-- kin-editor-release-pr-activation-failure:${GITHUB_REPOSITORY}:${head_sha} -->"
+              issue="$(
+                jq -cn \
+                  --arg marker "$marker" \
+                  --arg branch "$BRANCH" \
+                  --arg head "$head_sha" \
+                  '{
+                    marker:$marker,
+                    title:"[release failure] Kin Editor release PR could not activate CI",
+                    body:($marker + "\n## Terminal automatic release-PR activation failure\n\nThe protected release PR still has no runnable exact-head CI after its one bounded activation commit. The controller will not rewrite the head or bypass required checks.\n\n- Branch: `" + $branch + "`\n- Head commit: `" + $head + "`\n- Automatic activation commits exhausted: `1`\n"),
+                    label:"release:terminal-failure"
+                  }'
+              )"
+              upsert_terminal_issue "$issue"
+              ;;
+            activate)
+              fresh_state="$(snapshot)"
+              fresh="$(classify <<< "$fresh_state")"
+              if [ "$(jq -er .action <<< "$fresh")" != activate ] ||
+                 [ "$(jq -er .headSha <<< "$fresh")" != "$head_sha" ] ||
+                 [ "$(jq -er .prNumber <<< "$fresh")" != "$pr" ]; then
+                echo "::notice::exact release-PR state changed before activation."
+                exit 0
+              fi
+              git fetch origin \
+                "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+              [ "$(git rev-parse "refs/remotes/origin/${BRANCH}")" = "$head_sha" ]
+              activation_subject="$(jq -er .activationSubject <<< "$fresh")"
+              git checkout -B "$BRANCH" "refs/remotes/origin/${BRANCH}"
+              git config user.name "kin-release-bot[bot]"
+              git config user.email "kin-release-bot[bot]@users.noreply.github.com"
+              git commit --allow-empty --signoff -m "$activation_subject"
+              git push origin "HEAD:refs/heads/${BRANCH}"
+              ;;
             wait)
               echo "::notice::exact release-PR head ${head_sha} is still active or not safely mergeable."
               ;;
@@ -154,45 +253,7 @@ jobs:
                       --head-sha "$head_sha" \
                       --head-branch "$BRANCH"
               )"
-              marker="$(jq -er .marker <<< "$issue")"
-              label="$(jq -er .label <<< "$issue")"
-              GH_TOKEN="$ACTIONS_TOKEN" gh label create "$label" \
-                --repo "$GITHUB_REPOSITORY" \
-                --color B60205 \
-                --description "Automatic release exhausted its bounded retries" \
-                --force
-              existing="$(
-                GH_TOKEN="$ACTIONS_TOKEN" gh api --method GET --paginate \
-                  "repos/${GITHUB_REPOSITORY}/issues" \
-                  -f state=all -f per_page=100 --slurp \
-                  | jq -c --arg marker "$marker" '
-                      [flatten[] |
-                        select(.user.login == "github-actions[bot]" and
-                               (has("pull_request") | not) and
-                               ((.body // "") | contains($marker)))]
-                    '
-              )"
-              case "$(jq -r length <<< "$existing")" in
-                0)
-                  jq -c --arg label "$label" \
-                    '{title,body,labels:[$label]}' <<< "$issue" \
-                    | GH_TOKEN="$ACTIONS_TOKEN" gh api --method POST \
-                        "repos/${GITHUB_REPOSITORY}/issues" --input - \
-                        >/dev/null
-                  ;;
-                1)
-                  number="$(jq -er '.[0].number' <<< "$existing")"
-                  jq -c --arg label "$label" \
-                    '{title,body,state:"open",labels:[$label]}' <<< "$issue" \
-                    | GH_TOKEN="$ACTIONS_TOKEN" gh api --method PATCH \
-                        "repos/${GITHUB_REPOSITORY}/issues/${number}" --input - \
-                        >/dev/null
-                  ;;
-                *)
-                  echo "::error::multiple terminal release-PR issues carry ${marker}"
-                  exit 1
-                  ;;
-              esac
+              upsert_terminal_issue "$issue"
               ;;
             success)
               fresh_state="$(snapshot)"

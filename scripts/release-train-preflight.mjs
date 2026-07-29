@@ -12,6 +12,8 @@ import { classifyTrainCi } from "./release-train-ci-policy.mjs";
 
 const SHA = /^[0-9a-f]{40}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const ACTIVATION_SUBJECT =
+  "Activate protected checks for the automated release PR";
 
 function fail(message) {
   throw new Error(`release train preflight: ${message}`);
@@ -50,6 +52,13 @@ export function classifyExistingTrain(
     fail("release PR owner is not trusted");
   }
   if (!SHA.test(pull.headRefOid ?? "")) fail("release PR head is not exact");
+  if (
+    typeof pull.headCommitSubject !== "string" ||
+    pull.headCommitSubject.length === 0 ||
+    pull.headCommitSubject.includes("\n")
+  ) {
+    fail("release PR head subject is invalid");
+  }
 
   const decision = classifyTrainCi(payload.workflowRuns, {
     repository,
@@ -63,10 +72,17 @@ export function classifyExistingTrain(
   };
 
   if (decision.action === "activate") {
+    if (pull.headCommitSubject === ACTIVATION_SUBJECT) {
+      return {
+        ...context,
+        action: "activation-terminal",
+        activationSubject: ACTIVATION_SUBJECT,
+        reason: "bounded-activation-commit-exhausted",
+      };
+    }
     return {
       ...context,
-      action: "proceed",
-      reason: "exact-head-ci-needs-activation",
+      activationSubject: ACTIVATION_SUBJECT,
     };
   }
   if (
