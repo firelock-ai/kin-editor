@@ -13,6 +13,7 @@ on:
     types: [release-reconcile]
 
 permissions:
+  actions: write
   contents: read
   issues: write
   pull-requests: read
@@ -27,9 +28,15 @@ jobs:
     if: >-
       github.event_name != 'workflow_run' ||
       (
-        github.event.workflow_run.event == 'push' &&
-        github.event.workflow_run.head_branch == 'main' &&
-        github.event.workflow_run.conclusion == 'success'
+        (
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.conclusion == 'success'
+        ) ||
+        (
+          github.event.workflow_run.event == 'pull_request' &&
+          github.event.workflow_run.head_branch == 'automation/release-next'
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -92,6 +99,17 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          repository_policy="$(gh api "repos/${REPO}")"
+          jq -e '
+            .allow_squash_merge == true and
+            .allow_merge_commit == false and
+            .allow_rebase_merge == false and
+            .squash_merge_commit_title == "PR_TITLE" and
+            .squash_merge_commit_message == "PR_BODY"
+          ' <<< "$repository_policy" >/dev/null || {
+            echo "::error::immutable PR-body release intent requires enforced PR_TITLE + PR_BODY squash-only merging"
+            exit 1
+          }
           git fetch origin \
             "+refs/heads/main:refs/remotes/origin/main" \
             "+refs/tags/*:refs/tags/*"
@@ -360,38 +378,37 @@ jobs:
               --jq .headRefOid
           )"
           [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
-          needs_activation=true
+          decision='{"action":"activate"}'
           for attempt in 1 2 3 4 5 6; do
             runs="$(
               gh api \
                 "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=pull_request&per_page=30"
             )"
-            valid="$(
-              jq -r \
-                --arg sha "$head_sha" \
-                '[.workflow_runs[] |
-                  select(
-                    .head_sha == $sha and
-                    .event == "pull_request" and
-                    .path == ".github/workflows/ci.yml" and
-                    .conclusion != "action_required"
-                  )
-                ] | length' \
+            decision="$(
+              node scripts/release-train-ci-policy.mjs classify \
+                --repository "$GITHUB_REPOSITORY" \
+                --head-sha "$head_sha" \
+                --head-branch "$BRANCH" \
                 <<< "$runs"
             )"
-            if [ "$valid" -gt 0 ]; then
-              needs_activation=false
+            action="$(jq -er .action <<< "$decision")"
+            if [ "$action" != activate ] ||
+               jq -e 'has("runId")' <<< "$decision" >/dev/null; then
               break
             fi
             [ "$attempt" -eq 6 ] || sleep 2
           done
           {
             echo "number=$pr"
-            echo "needs_activation=$needs_activation"
+            echo "head_sha=$head_sha"
+            echo "ci_action=$(jq -er .action <<< "$decision")"
+            echo "ci_run_id=$(jq -r '.runId // ""' <<< "$decision")"
+            echo "ci_run_attempt=$(jq -r '.runAttempt // ""' <<< "$decision")"
+            echo "ci_conclusion=$(jq -r '.conclusion // ""' <<< "$decision")"
           } >> "$GITHUB_OUTPUT"
 
       - name: Activate ordinary PR checks with the release App
-        if: steps.pr.outputs.needs_activation == 'true'
+        if: steps.pr.outputs.ci_action == 'activate'
         env:
           BRANCH: ${{ steps.branch.outputs.branch }}
         run: |
@@ -399,6 +416,104 @@ jobs:
           git commit --allow-empty --signoff \
             -m "Activate protected checks for the automated release PR"
           git push origin "HEAD:refs/heads/${BRANCH}"
+
+      - name: Retry failed ordinary PR checks
+        if: steps.pr.outputs.ci_action == 'retry'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          EXPECTED_ATTEMPT: ${{ steps.pr.outputs.ci_run_attempt }}
+          EXPECTED_RUN_ID: ${{ steps.pr.outputs.ci_run_id }}
+        run: |
+          set -euo pipefail
+          runs="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=pull_request&per_page=30"
+          )"
+          decision="$(
+            node scripts/release-train-ci-policy.mjs classify \
+              --repository "$GITHUB_REPOSITORY" \
+              --head-sha "$HEAD_SHA" \
+              --head-branch "$BRANCH" \
+              <<< "$runs"
+          )"
+          [ "$(jq -er .action <<< "$decision")" = retry ]
+          [ "$(jq -er .runId <<< "$decision")" = "$EXPECTED_RUN_ID" ]
+          [ "$(jq -er .runAttempt <<< "$decision")" = "$EXPECTED_ATTEMPT" ]
+          conclusion="$(jq -er .conclusion <<< "$decision")"
+          case "$conclusion" in
+            cancelled)
+              endpoint="rerun"
+              ;;
+            failure|startup_failure|timed_out)
+              endpoint="rerun-failed-jobs"
+              ;;
+            *)
+              echo "::error::exact release-PR CI is no longer retryable"
+              exit 1
+              ;;
+          esac
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${EXPECTED_RUN_ID}/${endpoint}"
+
+      - name: Reconcile terminal release-PR failure issue
+        if: steps.pr.outputs.ci_action == 'terminal'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          runs="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=pull_request&per_page=30"
+          )"
+          issue="$(
+            node scripts/release-train-ci-policy.mjs issue \
+              --repository "$GITHUB_REPOSITORY" \
+              --head-sha "$HEAD_SHA" \
+              --head-branch "$BRANCH" \
+              <<< "$runs"
+          )"
+          marker="$(jq -er .marker <<< "$issue")"
+          label="$(jq -er .label <<< "$issue")"
+          gh label create "$label" --repo "$GITHUB_REPOSITORY" \
+            --color B60205 \
+            --description "Automatic release exhausted its bounded retries" \
+            --force
+          existing="$(
+            gh api --method GET --paginate \
+              "repos/${GITHUB_REPOSITORY}/issues" \
+              -f state=all -f per_page=100 --slurp \
+              | jq -c --arg marker "$marker" '
+                  [flatten[] |
+                    select(.user.login == "github-actions[bot]" and
+                           (has("pull_request") | not) and
+                           ((.body // "") | contains($marker)))]
+                '
+          )"
+          case "$(jq -r length <<< "$existing")" in
+            0)
+              jq -c --arg label "$label" \
+                '{title,body,labels:[$label]}' <<< "$issue" \
+                | gh api --method POST \
+                    "repos/${GITHUB_REPOSITORY}/issues" --input - \
+                    >/dev/null
+              ;;
+            1)
+              number="$(jq -er '.[0].number' <<< "$existing")"
+              jq -c --arg label "$label" \
+                '{title,body,state:"open",labels:[$label]}' <<< "$issue" \
+                | gh api --method PATCH \
+                    "repos/${GITHUB_REPOSITORY}/issues/${number}" --input - \
+                    >/dev/null
+              ;;
+            *)
+              echo "::error::multiple terminal release-PR issues carry ${marker}"
+              exit 1
+              ;;
+          esac
 
       - name: Arm protected auto-merge
         if: steps.plan.outputs.needed == 'true'

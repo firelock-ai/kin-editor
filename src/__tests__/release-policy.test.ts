@@ -397,11 +397,12 @@ describe("automatic release workflow authority", () => {
     expect(train).not.toMatch(/git push origin :/);
   });
 
-  it("tags only exact required-check-green main through the release environment", () => {
+  it("tags only the exact required-check-green version commit", () => {
     const tag = readFileSync(join(WORKFLOWS, "release-tag.yml"), "utf8");
     expect(tag).toContain("environment: release-tag");
     expect(tag).toContain("repositories: kin-editor");
-    expect(tag).toContain("commits/${main_sha}/check-runs");
+    expect(tag).toContain("resolve-version-commit.mjs");
+    expect(tag).toContain("commits/${release_sha}/check-runs");
     expect(tag).toContain("for required in test release-policy");
     expect(tag).toContain(".app.id == 15368");
     expect(tag).toContain('.app.slug == "github-actions"');
@@ -409,12 +410,13 @@ describe("automatic release workflow authority", () => {
     expect(tag).toContain(
       "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
     );
-    expect(tag).toContain("Install trusted release-policy dependencies");
-    expect(tag).toContain("run: npm ci");
-    expect(tag.indexOf("run: npm ci")).toBeLessThan(
+    expect(tag).toContain('git checkout --detach "$release_sha"');
+    expect(tag).toContain("npm ci");
+    expect(tag.indexOf("npm ci")).toBeLessThan(
       tag.indexOf("node scripts/release-policy.mjs verify"),
     );
-    expect(tag).toContain("release-train reconciliation owns current main drift");
+    expect(tag).toContain('--arg object "$release_sha"');
+    expect(tag).toContain("later main drift remains for the next train");
     expect(tag).toContain('"repos/${REPO}/git/tags"');
     expect(tag).toContain('"repos/${REPO}/git/refs"');
     expect(tag).not.toContain("workflow_dispatch:");

@@ -57,9 +57,6 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install trusted release-policy dependencies
-        run: npm ci
-
       - name: Reconcile the exact reviewed main release
         env:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -77,11 +74,22 @@ jobs:
             echo "::notice::the completed CI run is not current main; a later reconcile owns it."
             exit 0
           fi
+          version="$(git show refs/remotes/origin/main:package.json | jq -er .version)"
+          tag="v${version}"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          release_sha="$(
+            node scripts/resolve-version-commit.mjs \
+              --head-ref refs/remotes/origin/main \
+              --target-version "$version" \
+              | jq -er .commit
+          )"
+          [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$release_sha" "$main_sha"
 
           checks="$(
             gh api \
               -H "Accept: application/vnd.github+json" \
-              "repos/${REPO}/commits/${main_sha}/check-runs?per_page=100"
+              "repos/${REPO}/commits/${release_sha}/check-runs?per_page=100"
           )"
           for required in test release-policy; do
             latest="$(
@@ -99,7 +107,7 @@ jobs:
                 <<< "$checks"
             )"
             if [ -z "$latest" ]; then
-              echo "::notice::current main lacks GitHub Actions check ${required}."
+              echo "::notice::prepared release commit lacks GitHub Actions check ${required}."
               exit 0
             fi
             conclusion="$(jq -r '.conclusion // empty' <<< "$latest")"
@@ -109,22 +117,18 @@ jobs:
             fi
           done
 
-          version="$(jq -er .version package.json)"
-          tag="v${version}"
-          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git checkout --detach "$release_sha"
+          npm ci
+          [ "$(jq -er .version package.json)" = "$version" ]
           node scripts/release-policy.mjs verify
 
           if git rev-parse --verify --quiet "${tag}^{commit}" >/dev/null; then
             tagged_sha="$(git rev-parse "${tag}^{commit}")"
-            if [ "$tagged_sha" != "$main_sha" ]; then
-              if git merge-base --is-ancestor "$tagged_sha" "$main_sha"; then
-                echo "::notice::${tag} remains the latest released ancestor; release-train reconciliation owns current main drift."
-                exit 0
-              fi
-              echo "::error::${tag} resolves to non-ancestor ${tagged_sha}, not current main ${main_sha}."
+            if [ "$tagged_sha" != "$release_sha" ]; then
+              echo "::error::${tag} resolves to ${tagged_sha}, not exact version-introducing commit ${release_sha}."
               exit 1
             fi
-            echo "::notice::${tag} already points at exact current main."
+            echo "::notice::${tag} already points at exact version-introducing commit."
             exit 0
           fi
 
@@ -162,7 +166,7 @@ jobs:
             jq -n \
               --arg tag "$tag" \
               --arg message "Kin Editor ${tag}" \
-              --arg object "$main_sha" \
+              --arg object "$release_sha" \
               '{
                 tag:$tag,
                 message:$message,
@@ -190,5 +194,5 @@ jobs:
                 --input - \
                 >/dev/null
           git fetch origin "+refs/tags/${tag}:refs/tags/${tag}"
-          test "$(git rev-parse "${tag}^{commit}")" = "$main_sha"
-          echo "Created ${tag} at exact reviewed main ${main_sha}."
+          test "$(git rev-parse "${tag}^{commit}")" = "$release_sha"
+          echo "Created ${tag} at exact reviewed version commit ${release_sha}; later main drift remains for the next train."
