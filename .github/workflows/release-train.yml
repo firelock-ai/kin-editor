@@ -69,7 +69,154 @@ jobs:
       - name: Install trusted release-policy dependencies
         run: npm ci
 
+      - name: Recover existing exact-head CI before release-branch mutation
+        id: recovery
+        env:
+          ACTIONS_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH: automation/release-next
+        run: |
+          set -euo pipefail
+          snapshot() {
+            local pulls runs
+            pulls="$(
+              GH_TOKEN="$APP_TOKEN" gh pr list \
+                --repo "$GITHUB_REPOSITORY" \
+                --state open \
+                --head "$BRANCH" \
+                --json number,baseRefName,headRefName,headRefOid,isCrossRepository,headRepository,headRepositoryOwner,mergeStateStatus
+            )"
+            runs="$(
+              GH_TOKEN="$ACTIONS_TOKEN" gh api \
+                "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=pull_request&per_page=30"
+            )"
+            jq -cn \
+              --argjson pullRequests "$pulls" \
+              --argjson workflowRuns "$runs" \
+              '{pullRequests:$pullRequests,workflowRuns:$workflowRuns}'
+          }
+          classify() {
+            node scripts/release-train-preflight.mjs \
+              --repository "$GITHUB_REPOSITORY" \
+              --head-branch "$BRANCH" \
+              --base-branch main
+          }
+          state="$(snapshot)"
+          decision="$(classify <<< "$state")"
+          action="$(jq -er .action <<< "$decision")"
+          if [ "$action" = proceed ]; then
+            echo "handled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::release reconciliation may proceed: $(jq -r .reason <<< "$decision")"
+            exit 0
+          fi
+
+          echo "handled=true" >> "$GITHUB_OUTPUT"
+          head_sha="$(jq -er .headSha <<< "$decision")"
+          pr="$(jq -er .prNumber <<< "$decision")"
+          [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
+          case "$action" in
+            wait)
+              echo "::notice::exact release-PR head ${head_sha} is still active or not safely mergeable."
+              ;;
+            retry)
+              expected_run="$(jq -er .runId <<< "$decision")"
+              expected_attempt="$(jq -er .runAttempt <<< "$decision")"
+              fresh_state="$(snapshot)"
+              fresh="$(classify <<< "$fresh_state")"
+              if [ "$(jq -er .action <<< "$fresh")" != retry ] ||
+                 [ "$(jq -er .headSha <<< "$fresh")" != "$head_sha" ] ||
+                 [ "$(jq -er .runId <<< "$fresh")" != "$expected_run" ] ||
+                 [ "$(jq -er .runAttempt <<< "$fresh")" != "$expected_attempt" ]; then
+                echo "::notice::exact release-PR CI changed before retry; a later serialized run owns it."
+                exit 0
+              fi
+              conclusion="$(jq -er .conclusion <<< "$fresh")"
+              case "$conclusion" in
+                cancelled) endpoint=rerun ;;
+                failure|startup_failure|timed_out) endpoint=rerun-failed-jobs ;;
+                *) echo "::error::exact release-PR CI is no longer retryable"; exit 1 ;;
+              esac
+              GH_TOKEN="$ACTIONS_TOKEN" gh api --method POST \
+                "repos/${GITHUB_REPOSITORY}/actions/runs/${expected_run}/${endpoint}"
+              ;;
+            terminal)
+              fresh_state="$(snapshot)"
+              fresh="$(classify <<< "$fresh_state")"
+              if [ "$(jq -er .action <<< "$fresh")" != terminal ] ||
+                 [ "$(jq -er .headSha <<< "$fresh")" != "$head_sha" ]; then
+                echo "::notice::exact release-PR CI changed before terminal reconciliation."
+                exit 0
+              fi
+              issue="$(
+                jq -c .workflowRuns <<< "$fresh_state" \
+                  | node scripts/release-train-ci-policy.mjs issue \
+                      --repository "$GITHUB_REPOSITORY" \
+                      --head-sha "$head_sha" \
+                      --head-branch "$BRANCH"
+              )"
+              marker="$(jq -er .marker <<< "$issue")"
+              label="$(jq -er .label <<< "$issue")"
+              GH_TOKEN="$ACTIONS_TOKEN" gh label create "$label" \
+                --repo "$GITHUB_REPOSITORY" \
+                --color B60205 \
+                --description "Automatic release exhausted its bounded retries" \
+                --force
+              existing="$(
+                GH_TOKEN="$ACTIONS_TOKEN" gh api --method GET --paginate \
+                  "repos/${GITHUB_REPOSITORY}/issues" \
+                  -f state=all -f per_page=100 --slurp \
+                  | jq -c --arg marker "$marker" '
+                      [flatten[] |
+                        select(.user.login == "github-actions[bot]" and
+                               (has("pull_request") | not) and
+                               ((.body // "") | contains($marker)))]
+                    '
+              )"
+              case "$(jq -r length <<< "$existing")" in
+                0)
+                  jq -c --arg label "$label" \
+                    '{title,body,labels:[$label]}' <<< "$issue" \
+                    | GH_TOKEN="$ACTIONS_TOKEN" gh api --method POST \
+                        "repos/${GITHUB_REPOSITORY}/issues" --input - \
+                        >/dev/null
+                  ;;
+                1)
+                  number="$(jq -er '.[0].number' <<< "$existing")"
+                  jq -c --arg label "$label" \
+                    '{title,body,state:"open",labels:[$label]}' <<< "$issue" \
+                    | GH_TOKEN="$ACTIONS_TOKEN" gh api --method PATCH \
+                        "repos/${GITHUB_REPOSITORY}/issues/${number}" --input - \
+                        >/dev/null
+                  ;;
+                *)
+                  echo "::error::multiple terminal release-PR issues carry ${marker}"
+                  exit 1
+                  ;;
+              esac
+              ;;
+            success)
+              fresh_state="$(snapshot)"
+              fresh="$(classify <<< "$fresh_state")"
+              if [ "$(jq -er .action <<< "$fresh")" != success ] ||
+                 [ "$(jq -er .headSha <<< "$fresh")" != "$head_sha" ] ||
+                 [ "$(jq -er .prNumber <<< "$fresh")" != "$pr" ]; then
+                echo "::notice::exact release-PR state changed before auto-merge admission."
+                exit 0
+              fi
+              GH_TOKEN="$APP_TOKEN" gh pr merge "$pr" \
+                --repo "$GITHUB_REPOSITORY" \
+                --auto \
+                --squash \
+                --match-head-commit "$head_sha"
+              ;;
+            *)
+              echo "::error::unsupported release-train preflight action: ${action}"
+              exit 1
+              ;;
+          esac
+
       - name: Ensure descriptive release labels exist
+        if: steps.recovery.outputs.handled != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -94,6 +241,7 @@ jobs:
 
       - name: Resolve release drift and SemVer intent
         id: plan
+        if: steps.recovery.outputs.handled != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}

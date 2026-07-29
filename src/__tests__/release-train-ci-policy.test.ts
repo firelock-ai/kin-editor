@@ -63,6 +63,12 @@ describe("release-train CI recovery policy", () => {
   it("is wired to bounded exact-head retry and terminal escalation", () => {
     expect(TRAIN_WORKFLOW).toContain("actions: write");
     expect(TRAIN_WORKFLOW).toContain(
+      "Recover existing exact-head CI before release-branch mutation",
+    );
+    expect(TRAIN_WORKFLOW).toContain(
+      "node scripts/release-train-preflight.mjs",
+    );
+    expect(TRAIN_WORKFLOW).toContain(
       "node scripts/release-train-ci-policy.mjs classify",
     );
     expect(TRAIN_WORKFLOW).toContain("steps.pr.outputs.ci_action == 'retry'");
@@ -73,6 +79,16 @@ describe("release-train CI recovery policy", () => {
     );
     expect(TRAIN_WORKFLOW).toContain(
       "multiple terminal release-PR issues carry",
+    );
+    expect(
+      TRAIN_WORKFLOW.indexOf(
+        "Recover existing exact-head CI before release-branch mutation",
+      ),
+    ).toBeLessThan(
+      TRAIN_WORKFLOW.indexOf("Create or coalesce the release branch"),
+    );
+    expect(TRAIN_WORKFLOW).toContain(
+      "if: steps.recovery.outputs.handled != 'true'",
     );
   });
 
