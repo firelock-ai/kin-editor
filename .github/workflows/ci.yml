@@ -4,6 +4,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Report the required `test` and `release-policy` contexts on the merge
+  # queue's speculative merge commits, so a queued PR is verified against the
+  # main it will actually land on rather than the one it was opened against.
+  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
