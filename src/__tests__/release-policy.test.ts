@@ -13,6 +13,7 @@ import { join, resolve } from "path";
 
 const REPO_ROOT = resolve(__dirname, "..", "..");
 const SCRIPT = join(REPO_ROOT, "scripts", "release-policy.mjs");
+const WORKFLOWS = join(REPO_ROOT, ".github", "workflows");
 
 jest.setTimeout(20_000);
 
@@ -32,6 +33,43 @@ function tempReleaseToml(transform: (text: string) => string): string {
   writeFileSync(path, transform(original));
   tempFiles.push(dir);
   return path;
+}
+
+function tempVersionAuthorities(version: string): {
+  policy: string;
+  packageJson: string;
+  mcpClient: string;
+} {
+  const original = readFileSync(join(REPO_ROOT, "release.toml"), "utf8");
+  const dir = mkdtempSync(join(tmpdir(), "kin-editor-compat-"));
+  const packageJson = join(dir, "package.json");
+  const mcpClient = join(dir, "mcp-client.ts");
+  const policy = join(dir, "release.toml");
+  writeFileSync(
+    packageJson,
+    `${JSON.stringify({ name: "kin-editor", version }, null, 2)}\n`,
+  );
+  writeFileSync(
+    mcpClient,
+    `this.sendRequest(
+  "initialize",
+  {
+    protocolVersion: "2024-11-05",
+    capabilities: {},
+    clientInfo: {
+      name: "kin-editor",
+      version: "${version}",
+    },
+  },
+);
+`,
+  );
+  writeFileSync(
+    policy,
+    original.replace('file = "package.json"', `file = "${packageJson}"`),
+  );
+  tempFiles.push(dir);
+  return { policy, packageJson, mcpClient };
 }
 
 afterAll(() => {
@@ -55,6 +93,50 @@ describe("release-policy verify", () => {
     expect(failures).toMatch(/mcp_protocol/);
   });
 
+  it("fails when MCP clientInfo.version cannot be source-checked", () => {
+    const source = readFileSync(join(REPO_ROOT, "src", "mcp-client.ts"), "utf8");
+    const dir = mkdtempSync(join(tmpdir(), "kin-editor-mcp-version-"));
+    const mcpClient = join(dir, "mcp-client.ts");
+    writeFileSync(
+      mcpClient,
+      source.replace(/\n\s*version:\s*"[^"]+",/, ""),
+    );
+    tempFiles.push(dir);
+
+    const { status, stdout } = runPolicy([
+      "verify",
+      "--mcp-client",
+      mcpClient,
+      "--json",
+    ]);
+    expect(status).toBe(1);
+    expect(JSON.parse(stdout).failures.join("\n")).toMatch(
+      /could not read clientInfo\.version/,
+    );
+  });
+
+  it("does not borrow a later decoy version when handshake authority is missing", () => {
+    const source = readFileSync(join(REPO_ROOT, "src", "mcp-client.ts"), "utf8");
+    const dir = mkdtempSync(join(tmpdir(), "kin-editor-mcp-decoy-"));
+    const mcpClient = join(dir, "mcp-client.ts");
+    writeFileSync(
+      mcpClient,
+      `${source.replace(/\n\s*version:\s*"[^"]+",/, "")}\nconst unrelated = { version: "0.1.1" };\n`,
+    );
+    tempFiles.push(dir);
+
+    const { status, stdout } = runPolicy([
+      "verify",
+      "--mcp-client",
+      mcpClient,
+      "--json",
+    ]);
+    expect(status).toBe(1);
+    expect(JSON.parse(stdout).failures.join("\n")).toMatch(
+      /could not read clientInfo\.version/,
+    );
+  });
+
   it("fails when a proof-impacting surface no longer exists", () => {
     const badToml = tempReleaseToml((t) =>
       t.replace('"src/mcp-client.ts",', '"src/does-not-exist.ts",')
@@ -62,6 +144,24 @@ describe("release-policy verify", () => {
     const { status, stdout } = runPolicy(["verify", "--file", badToml, "--json"]);
     expect(status).toBe(1);
     expect(JSON.parse(stdout).failures.join("\n")).toMatch(/does-not-exist\.ts/);
+  });
+
+  it("fails when the package version is outside every compatibility row", () => {
+    const fixture = tempVersionAuthorities("0.2.0");
+    const { status, stdout } = runPolicy([
+      "verify",
+      "--file",
+      fixture.policy,
+      "--package",
+      fixture.packageJson,
+      "--mcp-client",
+      fixture.mcpClient,
+      "--json",
+    ]);
+    expect(status).toBe(1);
+    expect(JSON.parse(stdout).failures.join("\n")).toMatch(
+      /outside every compatibility\.matrix extension range/,
+    );
   });
 });
 
@@ -95,19 +195,94 @@ describe("release-policy check-bump", () => {
     expect(status).toBe(1);
   });
 
-  it("allows a version bump that carries a real extension-source change", () => {
+  it("allows an exact successor carried by the protected generated release branch", () => {
     const { status, stdout } = runPolicy([
       "check-bump",
       "--changed-files",
-      "src/extension.ts,package.json",
+      "src/mcp-client.ts,package.json,package-lock.json,CHANGELOG.md",
       "--old-version",
       "0.1.0",
       "--new-version",
       "0.1.1",
+      "--head-ref",
+      "automation/release-next",
+      "--head-repo",
+      "firelock-ai/kin-editor",
+      "--base-repo",
+      "firelock-ai/kin-editor",
       "--json",
     ]);
     expect(status).toBe(0);
     expect(JSON.parse(stdout).versionChanged).toBe(true);
+  });
+
+  it.each([
+    ["0.1.1", "0.0.1", "strictly forward"],
+    ["0.1.1", "beta", "exact stable SemVer"],
+    ["0.1.1", "999.0.0", "not an exact patch, minor, or major successor"],
+  ])("rejects unsafe version authority %s -> %s", (oldVersion, newVersion, reason) => {
+    const { status, stdout } = runPolicy([
+      "check-bump",
+      "--changed-files",
+      "src/mcp-client.ts,package.json,package-lock.json,CHANGELOG.md",
+      "--old-version",
+      oldVersion,
+      "--new-version",
+      newVersion,
+      "--head-ref",
+      "automation/release-next",
+      "--head-repo",
+      "firelock-ai/kin-editor",
+      "--base-repo",
+      "firelock-ai/kin-editor",
+      "--json",
+    ]);
+    expect(status).toBe(1);
+    expect(JSON.parse(stdout).failures.join("\n")).toMatch(new RegExp(reason));
+  });
+
+  it("rejects version changes outside the first-party protected train", () => {
+    const { status, stdout } = runPolicy([
+      "check-bump",
+      "--changed-files",
+      "src/mcp-client.ts,package.json,package-lock.json,CHANGELOG.md",
+      "--old-version",
+      "0.1.1",
+      "--new-version",
+      "0.1.2",
+      "--head-ref",
+      "feature/manual-version",
+      "--head-repo",
+      "firelock-ai/kin-editor",
+      "--base-repo",
+      "firelock-ai/kin-editor",
+      "--json",
+    ]);
+    expect(status).toBe(1);
+    expect(JSON.parse(stdout).failures.join("\n")).toMatch(
+      /version authority belongs only/,
+    );
+  });
+
+  it("rejects non-generated paths in the protected train", () => {
+    const { status, stdout } = runPolicy([
+      "check-bump",
+      "--changed-files",
+      "src/extension.ts,src/mcp-client.ts,package.json,package-lock.json,CHANGELOG.md",
+      "--old-version",
+      "0.1.1",
+      "--new-version",
+      "0.1.2",
+      "--head-ref",
+      "automation/release-next",
+      "--head-repo",
+      "firelock-ai/kin-editor",
+      "--base-repo",
+      "firelock-ai/kin-editor",
+      "--json",
+    ]);
+    expect(status).toBe(1);
+    expect(JSON.parse(stdout).failures.join("\n")).toMatch(/non-generated paths/);
   });
 
   it("allows a dependency-only change with no version bump (ordinary hygiene)", () => {
@@ -151,5 +326,122 @@ describe("release-policy proof-impact", () => {
       "--json",
     ]);
     expect(JSON.parse(stdout).proofImpacting).toEqual([]);
+  });
+});
+
+describe("release-policy release-needed", () => {
+  it("selects release-impacting drift", () => {
+    const { status, stdout } = runPolicy([
+      "release-needed",
+      "--changed-files",
+      "README.md,.github/workflows/ci.yml",
+      "--old-version",
+      "0.1.1",
+      "--new-version",
+      "0.1.1",
+      "--json",
+    ]);
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({
+      needed: true,
+      releaseImpacting: ["README.md"],
+    });
+  });
+
+  it("does not release dependency and workflow hygiene", () => {
+    const { status, stdout } = runPolicy([
+      "release-needed",
+      "--changed-files",
+      "package.json,package-lock.json,.github/workflows/ci.yml",
+      "--old-version",
+      "0.1.1",
+      "--new-version",
+      "0.1.1",
+      "--json",
+    ]);
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({
+      needed: false,
+      releaseImpacting: [],
+    });
+  });
+
+  it("fails closed when release drift cannot be resolved", () => {
+    const { status, stderr } = runPolicy(["release-needed"]);
+    expect(status).toBe(1);
+    expect(stderr).toMatch(/could not resolve release drift/);
+  });
+});
+
+describe("automatic release workflow authority", () => {
+  it("keeps the coalescing writer Contents-only across workflow drift", () => {
+    const train = readFileSync(join(WORKFLOWS, "release-train.yml"), "utf8");
+    expect(train).toContain("environment: release-tag");
+    expect(train).toContain('"repos/${GITHUB_REPOSITORY}/merges"');
+    expect(train).toContain('"repos/${GITHUB_REPOSITORY}/git/refs"');
+    expect(train).toContain("git merge-base --is-ancestor");
+    expect(train).toContain("Neutralize generated release bytes");
+    expect(train).toContain("Signed-off-by: kin-release-bot[bot]");
+    expect(train).toContain("--match-head-commit");
+    expect(train).toContain("permission-contents: write");
+    expect(train).toContain("permission-pull-requests: write");
+    expect(train).toContain("GH_TOKEN: ${{ steps.app-token.outputs.token }}");
+    expect(train).toContain("Install trusted release-policy dependencies");
+    expect(train).toContain("run: npm ci");
+    expect(train).toContain("scripts/mcp-version-authority.mjs");
+    expect(train).not.toContain('scripts/release-policy.mjs; do');
+    expect(train).not.toContain("workflow_dispatch:");
+    expect(train).not.toContain("workflows: write");
+    expect(train).not.toMatch(/\bgit merge(?:\s|\\)/);
+    expect(train).not.toMatch(/git push (?:--force|-f)\b/);
+    expect(train).not.toMatch(/git push origin :/);
+  });
+
+  it("tags only the exact required-check-green version commit", () => {
+    const tag = readFileSync(join(WORKFLOWS, "release-tag.yml"), "utf8");
+    expect(tag).toContain("environment: release-tag");
+    expect(tag).toContain("repositories: kin-editor");
+    expect(tag).toContain("resolve-version-commit.mjs");
+    expect(tag).toContain("commits/${release_sha}/check-runs");
+    expect(tag).toContain("for required in test release-policy");
+    expect(tag).toContain(".app.id == 15368");
+    expect(tag).toContain('.app.slug == "github-actions"');
+    expect(tag).toContain("permission-contents: write");
+    expect(tag).toContain(
+      "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+    );
+    expect(tag).toContain('git checkout --detach "$release_sha"');
+    expect(tag).toContain("npm ci");
+    expect(tag.indexOf("npm ci")).toBeLessThan(
+      tag.indexOf("node scripts/release-policy.mjs verify"),
+    );
+    expect(tag).toContain('--arg object "$release_sha"');
+    expect(tag).toContain("later main drift remains for the next train");
+    expect(tag).toContain('"repos/${REPO}/git/tags"');
+    expect(tag).toContain('"repos/${REPO}/git/refs"');
+    expect(tag).not.toContain("workflow_dispatch:");
+    expect(tag).toMatch(/permissions:\n {2}checks: read\n {2}contents: read/);
+  });
+
+  it("bounds automatic release retries before terminal escalation", () => {
+    const recovery = readFileSync(
+      join(WORKFLOWS, "release-recovery.yml"),
+      "utf8",
+    );
+    expect(recovery).toContain("github.event.workflow_run.run_attempt < 3");
+    expect(recovery).toContain("github.event.workflow_run.run_attempt >= 3");
+    expect(recovery).toContain("rerun-failed-jobs");
+    expect(recovery).toContain("release-recovery-policy.mjs validate");
+    expect(recovery).toContain("release-recovery-policy.mjs issue");
+    expect(recovery).not.toContain("workflow_dispatch:");
+  });
+
+  it("exposes Marketplace credentials only on the protected publish job", () => {
+    const release = readFileSync(join(WORKFLOWS, "release.yml"), "utf8");
+    expect(release).toMatch(/permissions:\n {2}contents: read/);
+    expect(release).toContain("environment: marketplace-publish");
+    expect(release).toMatch(
+      /release:[\s\S]*permissions:\n {6}contents: write/,
+    );
   });
 });

@@ -115,6 +115,38 @@ Public Git history is part of the product, so keep it clean and reviewable:
 - If your change is user-facing, briefly describe it in the PR body so
   reviewers understand the before/after behavior.
 
+## Releases
+
+Do not bump the extension version or create release tags in an ordinary pull
+request. After a release-impacting change reaches `main`, the protected release
+train opens or updates one generated release PR, selects a patch by default,
+and merges it only after the normal required checks pass. When a larger SemVer
+change is intentional, end the product PR body with exactly one immutable
+trailer:
+
+```
+Kin-Release-Intent: minor
+```
+
+Use `major` for a major release. The repository preserves the PR body in its
+squash commit and disables merge-commit and rebase methods, so this trailer is
+always part of landed first-parent evidence. The train scans those immutable
+commit messages since the last tag. Mutable PR and release-train labels are
+descriptive metadata only and cannot select or downgrade automatic release
+intent.
+
+The resulting reviewed `main` commit is tagged automatically and published to
+the Visual Studio Marketplace, Open VSX, and GitHub Releases. The tag binds to
+the exact checked first-parent commit that introduced the prepared version;
+later `main` drift stays in the next release train. Failed generated-PR checks
+are classified and recovered before the controller may coalesce `main` or
+rewrite that exact release-PR head. They receive two bounded automatic reruns
+before one exact-head terminal issue is opened. A PR whose checks do not start
+receives one bounded activation commit; a second activation state is terminal
+instead of creating another head. Version tags are immutable. If a published
+build is bad, recover with a fixed higher version; do not move or replace the
+existing tag.
+
 ## Reporting Issues
 
 File issues on [firelock-ai/kin-editor](https://github.com/firelock-ai/kin-editor/issues)

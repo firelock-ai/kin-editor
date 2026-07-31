@@ -1,0 +1,745 @@
+# Copyright 2026 Firelock LLC
+# SPDX-License-Identifier: Apache-2.0
+
+name: Release Train
+
+on:
+  schedule:
+    - cron: "11,26,41,56 * * * *"
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  repository_dispatch:
+    types: [release-reconcile]
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: kin-editor-release-train
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Reconcile release PR
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (
+        (
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.conclusion == 'success'
+        ) ||
+        (
+          github.event.workflow_run.event == 'pull_request' &&
+          github.event.workflow_run.head_branch == 'automation/release-next'
+        )
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release-tag
+    steps:
+      - name: Mint repository-scoped release token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v2.2.1
+        with:
+          app-id: ${{ secrets.KIN_RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.KIN_RELEASE_BOT_PRIVATE_KEY }}
+          owner: firelock-ai
+          repositories: kin-editor
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout trusted main
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Set up trusted Node runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install trusted release-policy dependencies
+        run: npm ci
+
+      - name: Recover existing exact-head CI before release-branch mutation
+        id: recovery
+        env:
+          ACTIONS_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH: automation/release-next
+        run: |
+          set -euo pipefail
+          snapshot() {
+            local pulls runs
+            pulls="$(
+              GH_TOKEN="$APP_TOKEN" gh pr list \
+                --repo "$GITHUB_REPOSITORY" \
+                --state open \
+                --head "$BRANCH" \
+                --json number,baseRefName,headRefName,headRefOid,isCrossRepository,headRepository,headRepositoryOwner,mergeStateStatus
+            )"
+            if [ "$(jq -r length <<< "$pulls")" = 1 ]; then
+              local head subject
+              head="$(jq -er '.[0].headRefOid' <<< "$pulls")"
+              subject="$(
+                GH_TOKEN="$APP_TOKEN" gh api \
+                  "repos/${GITHUB_REPOSITORY}/commits/${head}" \
+                  --jq '.commit.message | split("\n")[0]'
+              )"
+              pulls="$(
+                jq -c --arg subject "$subject" \
+                  '.[0].headCommitSubject = $subject' <<< "$pulls"
+              )"
+            fi
+            runs="$(
+              GH_TOKEN="$ACTIONS_TOKEN" gh api \
+                "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=pull_request&per_page=30"
+            )"
+            jq -cn \
+              --argjson pullRequests "$pulls" \
+              --argjson workflowRuns "$runs" \
+              '{pullRequests:$pullRequests,workflowRuns:$workflowRuns}'
+          }
+          classify() {
+            node scripts/release-train-preflight.mjs \
+              --repository "$GITHUB_REPOSITORY" \
+              --head-branch "$BRANCH" \
+              --base-branch main
+          }
+          upsert_terminal_issue() {
+            local issue="$1"
+            local marker label existing number
+            marker="$(jq -er .marker <<< "$issue")"
+            label="$(jq -er .label <<< "$issue")"
+            GH_TOKEN="$ACTIONS_TOKEN" gh label create "$label" \
+              --repo "$GITHUB_REPOSITORY" \
+              --color B60205 \
+              --description "Automatic release exhausted its bounded recovery" \
+              --force
+            existing="$(
+              GH_TOKEN="$ACTIONS_TOKEN" gh api --method GET --paginate \
+                "repos/${GITHUB_REPOSITORY}/issues" \
+                -f state=all -f per_page=100 --slurp \
+                | jq -c --arg marker "$marker" '
+                    [flatten[] |
+                      select(.user.login == "github-actions[bot]" and
+                             (has("pull_request") | not) and
+                             ((.body // "") | contains($marker)))]
+                  '
+            )"
+            case "$(jq -r length <<< "$existing")" in
+              0)
+                jq -c --arg label "$label" \
+                  '{title,body,labels:[$label]}' <<< "$issue" \
+                  | GH_TOKEN="$ACTIONS_TOKEN" gh api --method POST \
+                      "repos/${GITHUB_REPOSITORY}/issues" --input - \
+                      >/dev/null
+                ;;
+              1)
+                number="$(jq -er '.[0].number' <<< "$existing")"
+                jq -c --arg label "$label" \
+                  '{title,body,state:"open",labels:[$label]}' <<< "$issue" \
+                  | GH_TOKEN="$ACTIONS_TOKEN" gh api --method PATCH \
+                      "repos/${GITHUB_REPOSITORY}/issues/${number}" --input - \
+                      >/dev/null
+                ;;
+              *)
+                echo "::error::multiple terminal release-PR issues carry ${marker}"
+                exit 1
+                ;;
+            esac
+          }
+          state="$(snapshot)"
+          decision="$(classify <<< "$state")"
+          action="$(jq -er .action <<< "$decision")"
+          if [ "$action" = proceed ]; then
+            echo "handled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::release reconciliation may proceed: $(jq -r .reason <<< "$decision")"
+            exit 0
+          fi
+
+          echo "handled=true" >> "$GITHUB_OUTPUT"
+          head_sha="$(jq -er .headSha <<< "$decision")"
+          pr="$(jq -er .prNumber <<< "$decision")"
+          [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
+          case "$action" in
+            activation-terminal)
+              fresh_state="$(snapshot)"
+              fresh="$(classify <<< "$fresh_state")"
+              if [ "$(jq -er .action <<< "$fresh")" != activation-terminal ] ||
+                 [ "$(jq -er .headSha <<< "$fresh")" != "$head_sha" ] ||
+                 [ "$(jq -er .prNumber <<< "$fresh")" != "$pr" ]; then
+                echo "::notice::exact release-PR state changed before activation-terminal reconciliation."
+                exit 0
+              fi
+              marker="<!-- kin-editor-release-pr-activation-failure:${GITHUB_REPOSITORY}:${head_sha} -->"
+              issue="$(
+                jq -cn \
+                  --arg marker "$marker" \
+                  --arg branch "$BRANCH" \
+                  --arg head "$head_sha" \
+                  '{
+                    marker:$marker,
+                    title:"[release failure] Kin Editor release PR could not activate CI",
+                    body:($marker + "\n## Terminal automatic release-PR activation failure\n\nThe protected release PR still has no runnable exact-head CI after its one bounded activation commit. The controller will not rewrite the head or bypass required checks.\n\n- Branch: `" + $branch + "`\n- Head commit: `" + $head + "`\n- Automatic activation commits exhausted: `1`\n"),
+                    label:"release:terminal-failure"
+                  }'
+              )"
+              upsert_terminal_issue "$issue"
+              ;;
+            activate)
+              fresh_state="$(snapshot)"
+              fresh="$(classify <<< "$fresh_state")"
+              if [ "$(jq -er .action <<< "$fresh")" != activate ] ||
+                 [ "$(jq -er .headSha <<< "$fresh")" != "$head_sha" ] ||
+                 [ "$(jq -er .prNumber <<< "$fresh")" != "$pr" ]; then
+                echo "::notice::exact release-PR state changed before activation."
+                exit 0
+              fi
+              git fetch origin \
+                "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+              [ "$(git rev-parse "refs/remotes/origin/${BRANCH}")" = "$head_sha" ]
+              activation_subject="$(jq -er .activationSubject <<< "$fresh")"
+              git checkout -B "$BRANCH" "refs/remotes/origin/${BRANCH}"
+              git config user.name "kin-release-bot[bot]"
+              git config user.email "kin-release-bot[bot]@users.noreply.github.com"
+              git commit --allow-empty --signoff -m "$activation_subject"
+              git push origin "HEAD:refs/heads/${BRANCH}"
+              ;;
+            wait)
+              echo "::notice::exact release-PR head ${head_sha} is still active or not safely mergeable."
+              ;;
+            retry)
+              expected_run="$(jq -er .runId <<< "$decision")"
+              expected_attempt="$(jq -er .runAttempt <<< "$decision")"
+              fresh_state="$(snapshot)"
+              fresh="$(classify <<< "$fresh_state")"
+              if [ "$(jq -er .action <<< "$fresh")" != retry ] ||
+                 [ "$(jq -er .headSha <<< "$fresh")" != "$head_sha" ] ||
+                 [ "$(jq -er .runId <<< "$fresh")" != "$expected_run" ] ||
+                 [ "$(jq -er .runAttempt <<< "$fresh")" != "$expected_attempt" ]; then
+                echo "::notice::exact release-PR CI changed before retry; a later serialized run owns it."
+                exit 0
+              fi
+              conclusion="$(jq -er .conclusion <<< "$fresh")"
+              case "$conclusion" in
+                cancelled) endpoint=rerun ;;
+                failure|startup_failure|timed_out) endpoint=rerun-failed-jobs ;;
+                *) echo "::error::exact release-PR CI is no longer retryable"; exit 1 ;;
+              esac
+              GH_TOKEN="$ACTIONS_TOKEN" gh api --method POST \
+                "repos/${GITHUB_REPOSITORY}/actions/runs/${expected_run}/${endpoint}"
+              ;;
+            terminal)
+              fresh_state="$(snapshot)"
+              fresh="$(classify <<< "$fresh_state")"
+              if [ "$(jq -er .action <<< "$fresh")" != terminal ] ||
+                 [ "$(jq -er .headSha <<< "$fresh")" != "$head_sha" ]; then
+                echo "::notice::exact release-PR CI changed before terminal reconciliation."
+                exit 0
+              fi
+              issue="$(
+                jq -c .workflowRuns <<< "$fresh_state" \
+                  | node scripts/release-train-ci-policy.mjs issue \
+                      --repository "$GITHUB_REPOSITORY" \
+                      --head-sha "$head_sha" \
+                      --head-branch "$BRANCH"
+              )"
+              upsert_terminal_issue "$issue"
+              ;;
+            success)
+              fresh_state="$(snapshot)"
+              fresh="$(classify <<< "$fresh_state")"
+              if [ "$(jq -er .action <<< "$fresh")" != success ] ||
+                 [ "$(jq -er .headSha <<< "$fresh")" != "$head_sha" ] ||
+                 [ "$(jq -er .prNumber <<< "$fresh")" != "$pr" ]; then
+                echo "::notice::exact release-PR state changed before auto-merge admission."
+                exit 0
+              fi
+              GH_TOKEN="$APP_TOKEN" gh pr merge "$pr" \
+                --repo "$GITHUB_REPOSITORY" \
+                --auto \
+                --squash \
+                --match-head-commit "$head_sha"
+              ;;
+            *)
+              echo "::error::unsupported release-train preflight action: ${action}"
+              exit 1
+              ;;
+          esac
+
+      - name: Ensure descriptive release labels exist
+        if: steps.recovery.outputs.handled != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh label create "release:automated" \
+            --repo "$GITHUB_REPOSITORY" \
+            --color "0E8A16" \
+            --description "Automation-owned coalescing release PR" \
+            --force
+          for bump in patch minor major; do
+            case "$bump" in
+              patch) color="C5DEF5" ;;
+              minor) color="FBCA04" ;;
+              major) color="B60205" ;;
+            esac
+            gh label create "release:${bump}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --color "$color" \
+              --description "Describes the immutable ${bump} intent selected for the next Kin Editor release" \
+              --force
+          done
+
+      - name: Resolve release drift and SemVer intent
+        id: plan
+        if: steps.recovery.outputs.handled != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          repository_policy="$(gh api "repos/${REPO}")"
+          jq -e '
+            .allow_squash_merge == true and
+            .allow_merge_commit == false and
+            .allow_rebase_merge == false and
+            .squash_merge_commit_title == "PR_TITLE" and
+            .squash_merge_commit_message == "PR_BODY"
+          ' <<< "$repository_policy" >/dev/null || {
+            echo "::error::immutable PR-body release intent requires enforced PR_TITLE + PR_BODY squash-only merging"
+            exit 1
+          }
+          git fetch origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/tags/*:refs/tags/*"
+          main_sha="$(git rev-parse refs/remotes/origin/main)"
+          [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
+          version="$(git show refs/remotes/origin/main:package.json | jq -er .version)"
+          tag="v${version}"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+
+          highest_tag="$(
+            git tag --list 'v*.*.*' --sort=-v:refname \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | head -1
+          )"
+          latest_tag="$(gh api "repos/${REPO}/releases/latest" --jq .tag_name)"
+          if [ -z "$highest_tag" ] || [ "$highest_tag" != "$latest_tag" ]; then
+            echo "::notice::highest stable tag and GitHub Latest differ; release recovery owns this state."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git rev-parse --verify --quiet "${tag}^{commit}" >/dev/null; then
+            echo "::notice::${tag} is already prepared on main; tag reconciliation owns it."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          decision="$(
+            node scripts/release-policy.mjs release-needed \
+              --base "$tag" \
+              --head refs/remotes/origin/main \
+              --json
+          )"
+          needed="$(jq -er '.needed | tostring' <<< "$decision")"
+          if [ "$needed" != true ]; then
+            echo "::notice::main contains no unreleased editor surface."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          intent="$(
+            node scripts/resolve-release-intent.mjs \
+              --base-ref "$tag" \
+              --head-ref refs/remotes/origin/main \
+              | jq -er .intent
+          )"
+          case "$intent" in
+            patch|minor|major) bump="$intent" ;;
+            *) echo "::error::unsupported immutable release intent: $intent"; exit 1 ;;
+          esac
+
+          {
+            echo "needed=true"
+            echo "base_tag=$tag"
+            echo "bump=$bump"
+            echo "main_sha=$main_sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create or coalesce the release branch
+        id: branch
+        if: steps.plan.outputs.needed == 'true'
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          BASE_TAG: ${{ steps.plan.outputs.base_tag }}
+          BUMP: ${{ steps.plan.outputs.bump }}
+          MAIN_SHA: ${{ steps.plan.outputs.main_sha }}
+          BRANCH: automation/release-next
+        run: |
+          set -euo pipefail
+          [[ "$MAIN_SHA" =~ ^[0-9a-f]{40}$ ]]
+          allowed='^(CHANGELOG\.md|package\.json|package-lock\.json|src/mcp-client\.ts)$'
+          validate_generated_delta() {
+            local base="$1"
+            local head="$2"
+            local paths unexpected mode
+            paths="$(git diff --name-only "${base}...${head}")"
+            unexpected=""
+            while IFS= read -r path; do
+              [ -n "$path" ] || continue
+              if [[ ! "$path" =~ $allowed ]]; then
+                unexpected="${unexpected}${path}"$'\n'
+              fi
+            done <<< "$paths"
+            if [ -n "$unexpected" ]; then
+              echo "::error::release branch contains non-generated paths:"
+              printf '%s\n' "$unexpected"
+              exit 1
+            fi
+            while IFS= read -r path; do
+              [ -n "$path" ] || continue
+              mode="$(git ls-tree "$head" -- "$path" | awk '{print $1}')"
+              if [ "$mode" != 100644 ]; then
+                echo "::error::release branch path ${path} has unsafe mode ${mode:-missing}"
+                exit 1
+              fi
+            done <<< "$paths"
+          }
+
+          git config user.name "kin-release-bot[bot]"
+          git config user.email "kin-release-bot[bot]@users.noreply.github.com"
+          policy_dir="$RUNNER_TEMP/release-policy"
+          mkdir -p "$policy_dir"
+          for policy in \
+            scripts/prepare-release.mjs \
+            scripts/mcp-version-authority.mjs; do
+            git show "${MAIN_SHA}:${policy}" > "${policy_dir}/${policy##*/}"
+          done
+
+          existing=false
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            existing=true
+            git fetch origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+            validate_generated_delta "$MAIN_SHA" "refs/remotes/origin/${BRANCH}"
+            git checkout -B "$BRANCH" "refs/remotes/origin/${BRANCH}"
+
+            git restore --source "$MAIN_SHA" -- \
+              CHANGELOG.md \
+              package.json \
+              package-lock.json \
+              src/mcp-client.ts
+            if ! git diff --quiet; then
+              git add CHANGELOG.md package.json package-lock.json src/mcp-client.ts
+              git commit --signoff \
+                -m "Neutralize generated release bytes before main integration"
+              git push origin "HEAD:refs/heads/${BRANCH}"
+            fi
+
+            merge_message="$(
+              printf '%s\n\n%s\n' \
+                "Merge trusted main into the release train" \
+                "Signed-off-by: kin-release-bot[bot] <kin-release-bot[bot]@users.noreply.github.com>"
+            )"
+            jq -n \
+              --arg base "$BRANCH" \
+              --arg head "$MAIN_SHA" \
+              --arg commit_message "$merge_message" \
+              '{base:$base,head:$head,commit_message:$commit_message}' \
+              | GH_TOKEN="$APP_TOKEN" gh api \
+                  --method POST \
+                  "repos/${GITHUB_REPOSITORY}/merges" \
+                  --input - \
+                  >/dev/null
+
+            git fetch origin \
+              "+refs/heads/main:refs/remotes/origin/main" \
+              "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+            remote_main="$(git rev-parse refs/remotes/origin/main)"
+            if [ "$remote_main" != "$MAIN_SHA" ]; then
+              echo "::error::main advanced during release reconciliation; a later run must coalesce it."
+              exit 1
+            fi
+            git merge-base --is-ancestor "$MAIN_SHA" "refs/remotes/origin/${BRANCH}"
+            validate_generated_delta "$MAIN_SHA" "refs/remotes/origin/${BRANCH}"
+            git checkout -B "$BRANCH" "refs/remotes/origin/${BRANCH}"
+          else
+            jq -n \
+              --arg ref "refs/heads/${BRANCH}" \
+              --arg sha "$MAIN_SHA" \
+              '{ref:$ref,sha:$sha}' \
+              | GH_TOKEN="$APP_TOKEN" gh api \
+                  --method POST \
+                  "repos/${GITHUB_REPOSITORY}/git/refs" \
+                  --input - \
+                  >/dev/null
+            git fetch origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+            git checkout -B "$BRANCH" "refs/remotes/origin/${BRANCH}"
+          fi
+
+          git restore --source "$MAIN_SHA" -- \
+            CHANGELOG.md \
+            package.json \
+            package-lock.json \
+            src/mcp-client.ts
+          output="$RUNNER_TEMP/prepare-release.outputs"
+          : > "$output"
+          GITHUB_OUTPUT="$output" node "$policy_dir/prepare-release.mjs" \
+            --base-tag "$BASE_TAG" \
+            --bump "$BUMP" \
+            --source-ref "$MAIN_SHA"
+          version="$(sed -n 's/^version=//p' "$output")"
+          tag="$(sed -n 's/^tag=//p' "$output")"
+          test -n "$version"
+          test -n "$tag"
+
+          git add CHANGELOG.md package.json package-lock.json src/mcp-client.ts
+          if ! git diff --cached --quiet; then
+            git commit --signoff -m "Release Kin Editor ${tag}"
+          fi
+          node scripts/release-policy.mjs verify
+          node scripts/release-policy.mjs check-bump \
+            --base "$MAIN_SHA" \
+            --head HEAD \
+            --head-ref "$BRANCH" \
+            --head-repo "$GITHUB_REPOSITORY" \
+            --base-repo "$GITHUB_REPOSITORY"
+          validate_generated_delta "$MAIN_SHA" HEAD
+          git push origin "HEAD:refs/heads/${BRANCH}"
+          {
+            echo "branch=$BRANCH"
+            echo "existing=$existing"
+            echo "version=$version"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open the protected release PR
+        id: pr
+        if: steps.plan.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          LABEL_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          TAG: ${{ steps.branch.outputs.tag }}
+          BUMP: ${{ steps.plan.outputs.bump }}
+        run: |
+          set -euo pipefail
+          pr="$(
+            gh pr list \
+              --repo "$GITHUB_REPOSITORY" \
+              --state open \
+              --head "$BRANCH" \
+              --json number,headRepository,headRepositoryOwner \
+              --jq '[
+                .[] |
+                select(
+                  .headRepositoryOwner.login == "firelock-ai" and
+                  .headRepository.nameWithOwner == "firelock-ai/kin-editor"
+                )
+              ] | if length > 1 then error("multiple release-train PRs")
+                  else .[0].number // "" end'
+          )"
+          if [ -z "$pr" ]; then
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base main \
+              --head "$BRANCH" \
+              --title "Release Kin Editor ${TAG}" \
+              --body "Automated coalescing release PR. Patch is the default; immutable Kin-Release-Intent trailers on landed first-parent commits may raise SemVer. Labels are descriptive only. Normal required checks and protected auto-merge remain authoritative." \
+              >/dev/null
+            pr="$(
+              gh pr list \
+                --repo "$GITHUB_REPOSITORY" \
+                --state open \
+                --head "$BRANCH" \
+                --json number \
+                --jq 'if length == 1 then .[0].number
+                      else error("created release PR was not unique") end'
+            )"
+          fi
+          gh pr edit "$pr" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Release Kin Editor ${TAG}" \
+            --body "Automated coalescing release PR. Patch is the default; immutable Kin-Release-Intent trailers on landed first-parent commits may raise SemVer. Labels are descriptive only. Normal required checks and protected auto-merge remain authoritative."
+          jq -n \
+            --arg automated "release:automated" \
+            --arg bump "release:${BUMP}" \
+            '{labels:[$automated,$bump]}' \
+            | GH_TOKEN="$LABEL_TOKEN" gh api \
+                --method PUT \
+                "repos/${GITHUB_REPOSITORY}/issues/${pr}/labels" \
+                --input - \
+                >/dev/null
+
+          head_sha="$(
+            gh pr view "$pr" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json headRefOid \
+              --jq .headRefOid
+          )"
+          [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
+          decision='{"action":"activate"}'
+          for attempt in 1 2 3 4 5 6; do
+            runs="$(
+              gh api \
+                "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=pull_request&per_page=30"
+            )"
+            decision="$(
+              node scripts/release-train-ci-policy.mjs classify \
+                --repository "$GITHUB_REPOSITORY" \
+                --head-sha "$head_sha" \
+                --head-branch "$BRANCH" \
+                <<< "$runs"
+            )"
+            action="$(jq -er .action <<< "$decision")"
+            if [ "$action" != activate ] ||
+               jq -e 'has("runId")' <<< "$decision" >/dev/null; then
+              break
+            fi
+            [ "$attempt" -eq 6 ] || sleep 2
+          done
+          {
+            echo "number=$pr"
+            echo "head_sha=$head_sha"
+            echo "ci_action=$(jq -er .action <<< "$decision")"
+            echo "ci_run_id=$(jq -r '.runId // ""' <<< "$decision")"
+            echo "ci_run_attempt=$(jq -r '.runAttempt // ""' <<< "$decision")"
+            echo "ci_conclusion=$(jq -r '.conclusion // ""' <<< "$decision")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Activate ordinary PR checks with the release App
+        if: steps.pr.outputs.ci_action == 'activate'
+        env:
+          BRANCH: ${{ steps.branch.outputs.branch }}
+        run: |
+          set -euo pipefail
+          git commit --allow-empty --signoff \
+            -m "Activate protected checks for the automated release PR"
+          git push origin "HEAD:refs/heads/${BRANCH}"
+
+      - name: Retry failed ordinary PR checks
+        if: steps.pr.outputs.ci_action == 'retry'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          EXPECTED_ATTEMPT: ${{ steps.pr.outputs.ci_run_attempt }}
+          EXPECTED_RUN_ID: ${{ steps.pr.outputs.ci_run_id }}
+        run: |
+          set -euo pipefail
+          runs="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=pull_request&per_page=30"
+          )"
+          decision="$(
+            node scripts/release-train-ci-policy.mjs classify \
+              --repository "$GITHUB_REPOSITORY" \
+              --head-sha "$HEAD_SHA" \
+              --head-branch "$BRANCH" \
+              <<< "$runs"
+          )"
+          [ "$(jq -er .action <<< "$decision")" = retry ]
+          [ "$(jq -er .runId <<< "$decision")" = "$EXPECTED_RUN_ID" ]
+          [ "$(jq -er .runAttempt <<< "$decision")" = "$EXPECTED_ATTEMPT" ]
+          conclusion="$(jq -er .conclusion <<< "$decision")"
+          case "$conclusion" in
+            cancelled)
+              endpoint="rerun"
+              ;;
+            failure|startup_failure|timed_out)
+              endpoint="rerun-failed-jobs"
+              ;;
+            *)
+              echo "::error::exact release-PR CI is no longer retryable"
+              exit 1
+              ;;
+          esac
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${EXPECTED_RUN_ID}/${endpoint}"
+
+      - name: Reconcile terminal release-PR failure issue
+        if: steps.pr.outputs.ci_action == 'terminal'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          runs="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=pull_request&per_page=30"
+          )"
+          issue="$(
+            node scripts/release-train-ci-policy.mjs issue \
+              --repository "$GITHUB_REPOSITORY" \
+              --head-sha "$HEAD_SHA" \
+              --head-branch "$BRANCH" \
+              <<< "$runs"
+          )"
+          marker="$(jq -er .marker <<< "$issue")"
+          label="$(jq -er .label <<< "$issue")"
+          gh label create "$label" --repo "$GITHUB_REPOSITORY" \
+            --color B60205 \
+            --description "Automatic release exhausted its bounded retries" \
+            --force
+          existing="$(
+            gh api --method GET --paginate \
+              "repos/${GITHUB_REPOSITORY}/issues" \
+              -f state=all -f per_page=100 --slurp \
+              | jq -c --arg marker "$marker" '
+                  [flatten[] |
+                    select(.user.login == "github-actions[bot]" and
+                           (has("pull_request") | not) and
+                           ((.body // "") | contains($marker)))]
+                '
+          )"
+          case "$(jq -r length <<< "$existing")" in
+            0)
+              jq -c --arg label "$label" \
+                '{title,body,labels:[$label]}' <<< "$issue" \
+                | gh api --method POST \
+                    "repos/${GITHUB_REPOSITORY}/issues" --input - \
+                    >/dev/null
+              ;;
+            1)
+              number="$(jq -er '.[0].number' <<< "$existing")"
+              jq -c --arg label "$label" \
+                '{title,body,state:"open",labels:[$label]}' <<< "$issue" \
+                | gh api --method PATCH \
+                    "repos/${GITHUB_REPOSITORY}/issues/${number}" --input - \
+                    >/dev/null
+              ;;
+            *)
+              echo "::error::multiple terminal release-PR issues carry ${marker}"
+              exit 1
+              ;;
+          esac
+
+      - name: Arm protected auto-merge
+        if: steps.plan.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          head_sha="$(
+            gh pr view "$PR" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json headRefOid \
+              --jq .headRefOid
+          )"
+          [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
+          gh pr merge "$PR" \
+            --repo "$GITHUB_REPOSITORY" \
+            --auto \
+            --squash \
+            --match-head-commit "$head_sha"
