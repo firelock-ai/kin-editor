@@ -1,10 +1,6 @@
-<div align="center">
-<picture>
-<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/firelock-ai/kin-editor/main/brand/kin-lockup-dark.png">
-<source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/firelock-ai/kin-editor/main/brand/kin-lockup-light.png">
-<img src="https://raw.githubusercontent.com/firelock-ai/kin-editor/main/brand/kin-lockup-light.png" alt="Kin" width="260">
-</picture>
-</div>
+<p align="center">
+  <img src="brand/kin-lockup-dark.png" alt="Kin for Visual Studio Code" width="100%" />
+</p>
 
 # Kin for Visual Studio Code
 
