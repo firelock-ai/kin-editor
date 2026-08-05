@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="brand/kin-lockup-dark.png" alt="Kin for Visual Studio Code" width="100%" />
+  <img src="brand/kin-banner-dark.png" alt="Kin for Visual Studio Code" width="100%" />
 </p>
 
 # Kin for Visual Studio Code
