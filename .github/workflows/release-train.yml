@@ -78,7 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           snapshot() {
-            local pulls runs
+            local pulls runs_file status
             pulls="$(
               GH_TOKEN="$APP_TOKEN" gh pr list \
                 --repo "$GITHUB_REPOSITORY" \
@@ -99,14 +99,21 @@ jobs:
                   '.[0].headCommitSubject = $subject' <<< "$pulls"
               )"
             fi
-            runs="$(
-              GH_TOKEN="$ACTIONS_TOKEN" gh api \
-                "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=pull_request&per_page=30"
-            )"
+            runs_file="$(mktemp)"
+            GH_TOKEN="$ACTIONS_TOKEN" gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=pull_request&per_page=30" \
+              > "$runs_file"
+            status=0
             jq -cn \
               --argjson pullRequests "$pulls" \
-              --argjson workflowRuns "$runs" \
-              '{pullRequests:$pullRequests,workflowRuns:$workflowRuns}'
+              --slurpfile workflowRuns "$runs_file" \
+              'if ($workflowRuns | length) != 1 then
+                 error("CI runs API did not return exactly one JSON document")
+               else
+                 {pullRequests:$pullRequests,workflowRuns:$workflowRuns[0]}
+               end' || status=$?
+            rm -f "$runs_file"
+            return "$status"
           }
           classify() {
             node scripts/release-train-preflight.mjs \
