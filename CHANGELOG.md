@@ -2,6 +2,39 @@
 
 All notable changes to the Kin VS Code extension are documented in this file.
 
+## [0.1.2] - 2026-08-07
+
+### Changed
+
+- Read the release Train merge policy with the App token instead of the workflow token (#52)
+- Refuse assistant-session traces in pull request text (#51)
+- Read the CI runs payload from a file instead of jq's argv (#49)
+- Move js-yaml past the omap quadratic-CPU advisory (#50)
+- Replace the extension's visual identity with the current brand system (#48)
+- Refresh brand lockup and icon assets (#47)
+- Give each main-branch push its own CI concurrency group (#44)
+- Automate Kin Editor releases (#40)
+- chore(deps-dev): bump @types/node from 20.19.43 to 26.1.2 (#33)
+- Run CI on merge queue groups (#43)
+- Rasterize README lockup hero to PNG for vsce packaging (#42)
+- Pin @types/vscode to the declared 1.85 engine floor (#41)
+- Merge pull request #39 from firelock-ai/docs/readme-hero
+- docs: clarify Git hook safety (#37)
+- chore(deps): bump softprops/action-gh-release from 2 to 3 (#28)
+- chore(deps): bump actions/setup-node from 6 to 7 (#26)
+- chore(deps): bump actions/checkout from 6 to 7 (#27)
+- Modernize lint and test toolchain and clear the dependency audit (#38)
+- chore(deps-dev): bump @types/vscode from 1.110.0 to 1.125.0 (#30)
+- Fix CODEOWNERS to a valid owner handle (#35)
+- Lead README with brand canon hero (#34)
+- chore: add community scaffolding, drop internal ref, fix Open VSX case (#25)
+- chore: remove ticket references from release-policy comments (#24)
+- Merge pull request #23 from firelock-ai/docs/tagline-align
+- Merge pull request #22 from firelock-ai/docs/editor-onboarding
+- Merge pull request #21 from firelock-ai/docs/readme-polish
+- Fail closed on editor marketplace publication (#20)
+- Merge pull request #18 from firelock-ai/docs/editor-onboarding
+
 ## [0.1.1] - 2026-07-10
 
 ### Fixed
