@@ -22,9 +22,30 @@ import {
 let statusBar: KinStatusBar | undefined;
 let manager: WorkspaceManager | undefined;
 
+/** Every command declared in contributes.commands. */
+const CONTRIBUTED_COMMANDS = [
+  "kin.setupWorkspace",
+  "kin.search",
+  "kin.overview",
+  "kin.trace",
+  "kin.init",
+  "kin.status",
+  "kin.review",
+  "kin.refresh",
+] as const;
+
 export function activate(context: vscode.ExtensionContext): void {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
+    // The palette lists every contributed command from the manifest as soon as
+    // the extension activates, and activation is onStartupFinished. With no
+    // folder open there is nothing to bind them to, so bind them to an answer
+    // rather than letting the palette report "command not found".
+    context.subscriptions.push(
+      ...CONTRIBUTED_COMMANDS.map((id) =>
+        vscode.commands.registerCommand(id, () => explainNoFolder())
+      )
+    );
     return;
   }
 
@@ -189,17 +210,30 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
+  // Every Kin folder can be removed from the workspace after activation. When
+  // that happens there is no client left to resolve, and a command that simply
+  // returns leaves the user with no answer at all. Say what happened instead.
+  const resolveClientOrExplain = async () => {
+    if (manager!.size === 0) {
+      vscode.window.showWarningMessage(
+        "No Kin-initialized folder is open. Open a folder that contains .kin/, or run Kin: Initialize Repository."
+      );
+      return undefined;
+    }
+    return manager!.resolveActiveClient();
+  };
+
   // Commands — resolve active workspace for multi-root
   context.subscriptions.push(
     vscode.commands.registerCommand("kin.search", async () => {
-      const resolved = await manager!.resolveActiveClient();
+      const resolved = await resolveClientOrExplain();
       if (resolved) {
         await showSearchQuickPick(resolved.client, resolved.workspacePath);
       }
     }),
 
     vscode.commands.registerCommand("kin.overview", async () => {
-      const resolved = await manager!.resolveActiveClient();
+      const resolved = await resolveClientOrExplain();
       if (!resolved) return;
       try {
         const overview = await resolved.client.overview();
@@ -213,7 +247,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand("kin.trace", async () => {
-      const resolved = await manager!.resolveActiveClient();
+      const resolved = await resolveClientOrExplain();
       if (resolved) {
         await showTraceQuickPick(resolved.client, resolved.workspacePath);
       }
@@ -240,11 +274,15 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand("kin.status", async () => {
-      const resolved = await manager!.resolveActiveClient();
+      const resolved = await resolveClientOrExplain();
       if (!resolved) return;
       try {
         const status = await resolved.client.status();
-        if (status.initialized) {
+        if (status.reachable === false) {
+          vscode.window.showErrorMessage(
+            "Kin could not be reached in this workspace. Check that the kin binary is installed and the daemon can start, then run Kin: Show Status again."
+          );
+        } else if (status.initialized) {
           const mcpLabel = resolved.client.isMcpConnected() ? " (MCP)" : " (CLI)";
           vscode.window.showInformationMessage(
             `Kin${mcpLabel}: ${status.entityCount} entities indexed; graph state: ${status.graphState}.`
@@ -262,13 +300,40 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand("kin.review", async () => {
-      await reviewProvider.reviewFile();
+      // Review the file through the client that owns it. Falling back to the
+      // primary client would make the reviewed path relative to the wrong
+      // repository in a multi-root workspace.
+      const active = vscode.window.activeTextEditor?.document.uri.fsPath;
+      const owning = active ? manager!.getClientForPath(active) : undefined;
+      await reviewProvider.reviewFile(undefined, owning);
     }),
 
     vscode.commands.registerCommand("kin.refresh", () => {
       explorerProvider.refresh();
       statusBar?.update();
     })
+  );
+}
+
+/**
+ * Answer a Kin command invoked from a window that had no folder open when the
+ * extension activated. Re-reads the live workspace so a folder opened since
+ * activation gets the reload it needs instead of a stale complaint.
+ */
+async function explainNoFolder(): Promise<void> {
+  const current = vscode.workspace.workspaceFolders;
+  if (current && current.length > 0) {
+    const choice = await vscode.window.showInformationMessage(
+      "Kin started before this folder was open. Reload the window to enable Kin here.",
+      "Reload Window"
+    );
+    if (choice === "Reload Window") {
+      await vscode.commands.executeCommand("workbench.action.reloadWindow");
+    }
+    return;
+  }
+  await vscode.window.showInformationMessage(
+    "Kin needs an open folder. Open the repository you want to work in, then run this command again."
   );
 }
 

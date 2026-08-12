@@ -177,7 +177,7 @@
         "kin.mcpEnabled": {
           "type": "boolean",
           "default": true,
-          "description": "Use a persistent MCP connection to the Kin graph for zero-overhead queries. Disable to fall back to CLI subprocess per command."
+          "description": "Use a persistent MCP connection to the Kin graph for zero-overhead queries. Disable to fall back to one CLI subprocess per command. Hover and go-to-definition run only over MCP and return nothing while it is off."
         }
       }
     }

@@ -242,7 +242,7 @@ describe("KinClient", () => {
   });
 
   describe("status fallback", () => {
-    it("returns default status on error instead of throwing", async () => {
+    it("reports an unreachable runtime instead of claiming the repo is uninitialized", async () => {
       mockExecFile.mockImplementation(
         (
           _bin: string,
@@ -260,7 +260,34 @@ describe("KinClient", () => {
         initialized: false,
         entityCount: 0,
         graphState: "unknown",
+        reachable: false,
       });
+    });
+
+    it("marks a status the CLI actually answered as reachable", async () => {
+      mockExecFile.mockImplementation(
+        (
+          _bin: string,
+          _args: string[],
+          _opts: unknown,
+          cb: (err: Error | null, stdout: string, stderr: string) => void
+        ) => {
+          cb(
+            null,
+            JSON.stringify({
+              initialized: false,
+              entityCount: 0,
+              graphState: "uninitialized",
+            }),
+            ""
+          );
+        }
+      );
+
+      const client = new KinClient("/workspace");
+      const status = await client.status();
+      expect(status.reachable).toBe(true);
+      expect(status.initialized).toBe(false);
     });
   });
 

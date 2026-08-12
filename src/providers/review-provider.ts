@@ -76,9 +76,11 @@ export class KinReviewProvider implements vscode.Disposable {
 
   /**
    * Run `kin review` on the given file and display results.
-   * If no file is provided, uses the active editor's file.
+   * If no file is provided, uses the active editor's file. `client` overrides
+   * the provider's default client so a multi-root workspace reviews the file
+   * through the Kin repository that actually owns it.
    */
-  async reviewFile(filePath?: string): Promise<void> {
+  async reviewFile(filePath?: string, client?: KinClient): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     const targetPath = filePath ?? editor?.document.uri.fsPath;
 
@@ -96,7 +98,7 @@ export class KinReviewProvider implements vscode.Disposable {
 
     let result: ReviewResult;
     try {
-      result = await this.client.review(targetPath);
+      result = await (client ?? this.client).review(targetPath);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.outputChannel.appendLine(`Review failed: ${msg}`);
