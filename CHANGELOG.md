@@ -2,6 +2,13 @@
 
 All notable changes to the Kin VS Code extension are documented in this file.
 
+## [0.1.3] - 2026-08-12
+
+### Changed
+
+- Drop the kin.autoStart setting that nothing reads (#58)
+- Rewrite the em dashes out of the public docs (#57)
+
 ## [0.1.2] - 2026-08-07
 
 ### Changed
