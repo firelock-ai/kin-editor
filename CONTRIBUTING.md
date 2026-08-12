@@ -74,7 +74,7 @@ contributions from the community. A few requirements:
 ## Commit Messages
 
 This repository uses [Conventional Commits](https://www.conventionalcommits.org/).
-Recent history shows the expected shape — a `type(scope): summary` subject:
+Recent history shows the expected shape, a `type(scope): summary` subject:
 
 ```
 feat(explorer): add entity kind filter to sidebar tree
@@ -93,7 +93,7 @@ Public Git history is part of the product, so keep it clean and reviewable:
 
 - **Keep branch names topical, not tracker-coded.** Prefer short, descriptive
   names like `fix/search-empty-state` or `feat/entity-kind-filter`. Avoid
-  embedding internal issue or tracker IDs in a branch name — a squash merge
+  embedding internal issue or tracker IDs in a branch name. A squash merge
   copies the branch name into the public commit subject, so anything in the
   branch name lands in history verbatim.
 - **Keep private context private.** Do not publish private session URLs or IDs,
@@ -109,7 +109,7 @@ Public Git history is part of the product, so keep it clean and reviewable:
 ## Pull Requests
 
 - **Keep PRs scoped.** Stage only the files your change actually needs.
-  Unrelated cleanups belong in their own PR — this keeps review focused and
+  Unrelated cleanups belong in their own PR. That keeps review focused and
   history bisectable.
 - Make sure `npm run lint`, `npm test`, and `npm run compile` all pass.
 - If your change is user-facing, briefly describe it in the PR body so
@@ -152,8 +152,8 @@ existing tag.
 File issues on [firelock-ai/kin-editor](https://github.com/firelock-ai/kin-editor/issues)
 using the provided templates:
 
-- **Bug reports** — use the bug report template.
-- **Feature requests** — use the feature request template.
+- **Bug reports.** Use the bug report template.
+- **Feature requests.** Use the feature request template.
 
 For security vulnerabilities, do **not** open a public issue. Follow the
 private reporting process in [SECURITY.md](SECURITY.md).
