@@ -110,9 +110,11 @@ active path as MCP or CLI, and the extension never searches files on its own.
 
 ## Runtime behavior and settings
 
-On activation, the extension launches `kin mcp start` for each initialized
-workspace. That process starts or reuses the repository daemon; there is no
-separate daemon-start step. If no workspace contains `.kin/`, every Kin command
+With `kin.mcpEnabled` at its default, the extension launches `kin mcp start` on
+activation for each initialized workspace. That process starts or reuses the
+repository daemon; there is no separate daemon-start step. Turning the setting
+off runs one `kin` CLI subprocess per command instead, and either path needs the
+local `kin` binary. If no workspace contains `.kin/`, every Kin command
 still appears and guides the user to **Kin: Initialize Repository** or
 **Kin: Setup Workspace**.
 

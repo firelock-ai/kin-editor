@@ -174,11 +174,6 @@
           "default": "",
           "description": "Path to the kin binary. Leave empty to auto-detect (~/.kin/bin/kin or PATH)."
         },
-        "kin.autoStart": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically activate Kin when a .kin/ directory is found in the workspace."
-        },
         "kin.mcpEnabled": {
           "type": "boolean",
           "default": true,
