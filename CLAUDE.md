@@ -3,8 +3,8 @@
 # kin-editor
 
 VS Code extension for Kin (~3K production LOC). Provides entity explorer,
-semantic search, trace, rename/review providers, and status bar — all
-powered by the Kin daemon via MCP and the local HTTP API.
+semantic search, trace, rename/review providers, and status bar, all powered
+by the Kin daemon via MCP and the local HTTP API.
 
 ## Build
 
@@ -17,10 +17,10 @@ npm test               # jest suite
 
 ## Architecture
 
-- `src/extension.ts` — activation entry point
-- `src/providers/` — VS Code language/tree providers (rename, hover, trace)
-- `src/views/` — entity explorer tree views
-- `src/mcp.ts` — MCP client bridge to the Kin daemon
+- `src/extension.ts`: activation entry point
+- `src/providers/`: VS Code language/tree providers (rename, hover, trace)
+- `src/views/`: entity explorer tree views
+- `src/mcp.ts`: MCP client bridge to the Kin daemon
 
 The extension is a lightweight consumer of the Kin graph engine. No graph
 logic lives here; all semantic work is delegated to the daemon.
@@ -29,4 +29,4 @@ logic lives here; all semantic work is delegated to the daemon.
 
 Put work here when the job is VS Code UX, provider wiring, or MCP client
 calls. Graph retrieval, indexing, and session state belong in `kin` and
-`kin-db`. Do not add demo-only hardcoded state — surface real daemon data.
+`kin-db`. Do not add demo-only hardcoded state. Surface real daemon data.
