@@ -33,6 +33,14 @@ export interface KinStatus {
   initialized: boolean;
   entityCount: number;
   graphState: string;
+  /**
+   * False when neither the MCP graph path nor the CLI answered at all. In that
+   * case `initialized` is a failed probe rather than a real answer, and the UI
+   * must say the runtime could not be reached instead of telling a user with a
+   * perfectly good `.kin/` directory to initialize the repository again.
+   * Undefined on a status that predates this distinction.
+   */
+  reachable?: boolean;
 }
 
 /**
@@ -430,6 +438,12 @@ export class KinClient {
     return promise;
   }
 
+  /**
+   * Hover and go-to-definition run on every word the cursor touches, so this
+   * path is MCP-only on purpose. A CLI fallback here would spawn one subprocess
+   * per hover. With `kin.mcpEnabled` off, or before the MCP connection is live,
+   * it returns nothing and those two features stay quiet.
+   */
   private async runQuickTrace(entity: string): Promise<KinEntity[]> {
     if (!this.isMcpConnected()) {
       return [];
@@ -455,14 +469,24 @@ export class KinClient {
           5_000,
         );
         return this.parseStatusFromMcp(raw);
-      } catch {
-        // Silent fallback
+      } catch (err) {
+        logError("MCP kin_graph_status failed, falling back to CLI", err);
       }
     }
     try {
-      return await this.runJson<KinStatus>(["status"], 5_000);
-    } catch {
-      return { initialized: false, entityCount: 0, graphState: "unknown" };
+      const status = await this.runJson<KinStatus>(["status"], 5_000);
+      return { ...status, reachable: true };
+    } catch (err) {
+      // Both paths failed. Report that as unreachable rather than collapsing it
+      // into "not initialized", which sends the user to a remedy that cannot
+      // help them.
+      logError("Kin status failed on both MCP and CLI paths", err);
+      return {
+        initialized: false,
+        entityCount: 0,
+        graphState: "unknown",
+        reachable: false,
+      };
     }
   }
 
@@ -630,9 +654,15 @@ export class KinClient {
         initialized: true, // If MCP is running, repo is initialized
         entityCount: Number(parsed.entity_count ?? parsed.entities ?? 0),
         graphState: String(parsed.state ?? parsed.graph_state ?? "healthy"),
+        reachable: true,
       };
     } catch {
-      return { initialized: true, entityCount: 0, graphState: "unknown" };
+      return {
+        initialized: true,
+        entityCount: 0,
+        graphState: "unknown",
+        reachable: true,
+      };
     }
   }
 

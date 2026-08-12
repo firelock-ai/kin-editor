@@ -77,6 +77,19 @@ describe("accessibility strings", () => {
     ).toBe("$(graph) Kin: not initialized");
   });
 
+  it("separates an unreachable runtime from an uninitialized workspace", () => {
+    const unreachable = {
+      initialized: false,
+      entityCount: 0,
+      graphState: "unknown",
+      reachable: false,
+    };
+
+    expect(formatStatusBarText(unreachable)).toBe("$(graph) Kin: unavailable");
+    expect(formatStatusBarText(unreachable)).not.toContain("not initialized");
+    expect(formatStatusBarTooltip(unreachable)).toMatch(/could not be reached/i);
+  });
+
   it("formats overview messages consistently", () => {
     expect(
       formatOverviewMessage({

@@ -96,17 +96,22 @@ active path as MCP or CLI, and the extension never searches files on its own.
   `semantic_locate`, with results in a navigable picker. Workspace symbol search
   (`Cmd/Ctrl+T`) uses Kin's name-pattern graph search.
 - **Trace** (`Cmd/Ctrl+Shift+K T`): focal entity and nearby semantic context.
-  The same graph data supports go-to-definition (`F12`) and hover.
-- **Graph Overview** (`Cmd/Ctrl+Shift+K O`): indexed language, entity, and graph
-  summary for the active workspace.
+  The same graph data supports go-to-definition (`F12`) and hover, which both
+  need the MCP connection. See the runtime notes below.
+- **Graph Overview** (`Cmd/Ctrl+Shift+K O`): entity count for the active
+  workspace, plus edge, file, and entity-kind counts when the daemon reports
+  them. States the graph can be in, such as unreachable or still indexing, are
+  named rather than shown as zeros.
 - **Review** (`Cmd/Ctrl+Shift+K V`): report-only Kin review surfaced as gutter
   decorations, diagnostics, and the `Kin Review` output channel.
 - **Rename** (`F2`): a Kin rename plan for the selected entity and its graph
   references.
-- **Status Bar:** MCP/CLI connection, indexed entity count, graph state, and
-  health warnings such as a mass-deletion safety block.
+- **Status Bar:** indexed entity count, or an honest `not initialized` or
+  `unavailable` state. Click it for the overview. `Kin: Show Status` is what
+  reports the active MCP or CLI path and the graph state.
 - **Multi-root workspaces:** commands resolve the active file's owning workspace
-  before selecting its Kin client.
+  before selecting its Kin client. The entity explorer and the status bar follow
+  the first Kin-initialized folder in the workspace.
 
 ## Runtime behavior and settings
 
@@ -122,6 +127,16 @@ still appears and guides the user to **Kin: Initialize Repository** or
 | --- | --- | --- |
 | `kin.binaryPath` | auto-detect | Absolute `kin` binary path. Empty checks `~/.kin/bin/kin` and `PATH`. |
 | `kin.mcpEnabled` | `true` | Keep a persistent MCP connection; disable to use one CLI subprocess per command. |
+
+Hover and go-to-definition are the exception to that fallback. They fire on
+every word the cursor touches, so they run only over the MCP connection rather
+than spawning a subprocess per lookup. With `kin.mcpEnabled` off, or before the
+connection comes up, they return nothing and stay quiet. Search, trace,
+overview, status, review, and rename all keep working over the CLI.
+
+When neither path answers, the status bar reads `Kin: unavailable` and
+`Kin: Show Status` says the runtime could not be reached. Neither surface
+reports an unreachable daemon as an uninitialized repository.
 
 The extension requires the local Kin CLI and daemon. It does not require a
 hosted KinLab login, and it does not make the still-upcoming hosted repository

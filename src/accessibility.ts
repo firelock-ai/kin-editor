@@ -46,12 +46,18 @@ export function formatSearchResultDetail(entity: KinEntity): string {
 }
 
 export function formatStatusBarText(status: KinStatus): string {
+  if (status.reachable === false) {
+    return "$(graph) Kin: unavailable";
+  }
   return status.initialized
     ? `$(graph) Kin: ${status.entityCount} entities`
     : "$(graph) Kin: not initialized";
 }
 
 export function formatStatusBarTooltip(status: KinStatus): string {
+  if (status.reachable === false) {
+    return "Kin status. The Kin runtime could not be reached. Check that the kin binary is installed and the daemon can start. Click to open the overview.";
+  }
   return status.initialized
     ? `Kin status. ${status.entityCount} entities indexed. Click to open the overview.`
     : "Kin status. This workspace is not initialized yet. Click to open the overview.";
