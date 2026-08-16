@@ -214,7 +214,7 @@
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.65.0",
     "@vscode/vsce": "^3.9.2",
-    "eslint": "^10.8.0",
+    "eslint": "^10.8.1",
     "globals": "^17.8.0",
     "jest": "^30.4.2",
     "ovsx": "^1.0.1",
