@@ -208,7 +208,7 @@
     "@iarna/toml": "^2.2.5",
     "@types/jest": "^30.0.0",
     "@types/node": "^26.1.2",
-    "@types/vscode": "~1.85.0",
+    "@types/vscode": "~1.125.0",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.67.0",
     "@vscode/vsce": "^3.9.2",
