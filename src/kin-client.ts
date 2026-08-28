@@ -17,9 +17,29 @@ import { existsSync } from "fs";
 import { homedir } from "os";
 import { isAbsolute, join, relative, sep } from "path";
 import * as vscode from "vscode";
-import { BinaryNotFoundError, TimeoutError, ParseError } from "./errors";
+import {
+  BinaryNotFoundError,
+  CliContractError,
+  TimeoutError,
+  ParseError,
+} from "./errors";
 import { McpClient } from "./mcp-client";
 import { log, logError } from "./logger";
+import {
+  ContractDrift,
+  ContractNote,
+  ContractResult,
+  describeDrift,
+  describeNote,
+  driftKey,
+  noteKey,
+  normalizeEntity,
+  normalizeReviewFinding,
+  readEntities,
+  readOverview,
+  readReview,
+  readStatus,
+} from "./cli-contract";
 
 export interface KinEntity {
   kind: string;
@@ -41,6 +61,17 @@ export interface KinStatus {
    * Undefined on a status that predates this distinction.
    */
   reachable?: boolean;
+  /**
+   * Set when the CLI answered but in a shape this extension cannot read. That
+   * is neither "unreachable" nor "not initialized": the runtime is healthy and
+   * the two versions have drifted, so the UI must say so rather than send the
+   * user to `kin init` on a repository that is already initialized.
+   */
+  contractDrift?: {
+    command: string;
+    missing: readonly string[];
+    schema?: string;
+  };
 }
 
 /**
@@ -54,7 +85,8 @@ export type GraphAvailability =
   | "empty" // graph reachable, but zero entities yet
   | "not-indexed" // reachable, but this workspace is not indexed yet
   | "unavailable" // the daemon / binary could not be reached
-  | "invalid-response"; // a response arrived but could not be parsed as graph data
+  | "invalid-response" // a response arrived but could not be parsed as graph data
+  | "contract-drift"; // a valid response arrived in a shape this extension cannot read
 
 export interface KinOverview {
   entities: number;
@@ -126,6 +158,12 @@ export interface KinRenamePlan {
   warnings: string[];
 }
 
+function asRecord(value: unknown): UnknownRecord {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as UnknownRecord)
+    : {};
+}
+
 const QUICK_TRACE_CACHE_TTL_MS = 5_000;
 
 interface QuickTraceCacheEntry {
@@ -145,6 +183,9 @@ export class KinClient {
    * (or MCP round-trip) per word.
    */
   private quickTraceCache = new Map<string, QuickTraceCacheEntry>();
+
+  /** Contract drifts and schema notes already shown, so each is shown once. */
+  private reportedContractIssues = new Set<string>();
 
   constructor(workspacePath: string, mcpClient?: McpClient) {
     this.workspacePath = workspacePath;
@@ -221,7 +262,26 @@ export class KinClient {
     });
   }
 
-  private async runJson<T>(args: string[], timeoutMs?: number): Promise<T> {
+  /**
+   * Run a `kin <command> --json` call and read it through its declared
+   * contract.
+   *
+   * The contract check replaces a guard that could never fire. The old one
+   * warned only when the parsed object carried a numeric top-level `version`,
+   * and no `kin` release this extension has been measured against publishes
+   * one: `kin 0.6.0`'s status output has no `version` key at all. So the one
+   * mechanism built to catch CLI drift was structurally silent on exactly the
+   * drift it existed for, and a drifted answer reached the panes as a set of
+   * `undefined` reads that render as a confident empty graph.
+   *
+   * A reader that cannot use the answer now throws, and the user gets one
+   * warning naming the command and the missing keys.
+   */
+  private async runJson<T>(
+    args: string[],
+    read: (parsed: unknown) => ContractResult<T>,
+    timeoutMs?: number
+  ): Promise<T> {
     const raw = await this.run([...args, "--json"], timeoutMs);
     let parsed: unknown;
     try {
@@ -234,22 +294,54 @@ export class KinClient {
       );
     }
 
-    if (
-      parsed !== null &&
-      typeof parsed === "object" &&
-      "version" in parsed &&
-      typeof (parsed as Record<string, unknown>).version === "number"
-    ) {
-      const outputVersion = (parsed as Record<string, unknown>).version as number;
-      if (outputVersion > 1) {
-        vscode.window.showWarningMessage(
-          `Kin CLI output version ${outputVersion} is newer than this extension expects. ` +
-          `Some features may not work correctly. Please update the Kin VS Code extension.`
-        );
-      }
+    const result = read(parsed);
+    if (!result.ok) {
+      this.reportDrift(result);
+      throw new CliContractError(
+        result.command,
+        result.missing,
+        describeDrift(result),
+        result.schema
+      );
     }
 
-    return parsed as T;
+    if (result.note) {
+      this.reportNote(result.note);
+    }
+    return result.value;
+  }
+
+  /**
+   * Surface a drift once per session per distinct cause. A user running a
+   * command in a loop against a drifted CLI should see the warning, not a
+   * notification storm that trains them to dismiss it.
+   */
+  private reportDrift(drift: ContractDrift): void {
+    const message = describeDrift(drift);
+    logError(`Kin CLI contract drift on ${drift.command}`, new Error(message));
+    this.showOnce(driftKey(drift), message);
+  }
+
+  private reportNote(note: ContractNote): void {
+    this.showOnce(noteKey(note), describeNote(note));
+  }
+
+  /**
+   * Show a message once per session. Notification failures are swallowed on
+   * purpose: the caller is mid-diagnosis, and letting a failed notification
+   * throw would replace a precise "the CLI contract drifted" with whatever the
+   * UI threw, which the caller would then report as an unreachable runtime.
+   */
+  private showOnce(key: string, message: string): void {
+    if (this.reportedContractIssues.has(key)) {
+      return;
+    }
+    this.reportedContractIssues.add(key);
+    try {
+      vscode.window.showWarningMessage(message);
+    } catch (err) {
+      logError("Failed to surface a Kin CLI contract warning", err);
+    }
   }
 
   private async runWithProgress<T>(
@@ -298,7 +390,7 @@ export class KinClient {
     }
     return this.runWithProgress(
       "Kin: searching entities...",
-      () => this.runJson<KinEntity[]>(["search", query], 15_000),
+      () => this.runJson(["search", query], (raw) => readEntities("search", raw), 15_000),
       15_000
     );
   }
@@ -324,7 +416,7 @@ export class KinClient {
     }
     return this.runWithProgress(
       "Kin: searching symbols...",
-      () => this.runJson<KinEntity[]>(["search", query], 15_000),
+      () => this.runJson(["search", query], (raw) => readEntities("search", raw), 15_000),
       15_000
     );
   }
@@ -344,7 +436,7 @@ export class KinClient {
     }
     return this.runWithProgress(
       "Kin: loading entities...",
-      () => this.runJson<KinEntity[]>(["search", ""], 30_000),
+      () => this.runJson(["search", ""], (raw) => readEntities("search", raw), 30_000),
       30_000
     );
   }
@@ -367,20 +459,25 @@ export class KinClient {
     try {
       const cliOverview = await this.runWithProgress(
         "Kin: loading overview...",
-        () => this.runJson<Partial<KinOverview>>(["overview"], 10_000),
+        () => this.runJson(["overview"], readOverview, 10_000),
         10_000
       );
-      const entities = Number(cliOverview.entities ?? 0);
-      return {
-        entities,
-        edges: Number(cliOverview.edges ?? 0),
-        files: Number(cliOverview.files ?? 0),
-        kinds: cliOverview.kinds ?? {},
-        indexed: entities > 0,
-        availability: entities > 0 ? "indexed" : "empty",
-        compatFallback: mcpWasConnected,
-      };
+      return { ...cliOverview, compatFallback: mcpWasConnected };
     } catch (err) {
+      // The CLI answered in a shape this extension cannot read. That is not an
+      // unreachable graph, and calling it one sends the user to a remedy that
+      // cannot help. Give the drift its own state.
+      if (err instanceof CliContractError) {
+        return {
+          entities: 0,
+          edges: 0,
+          files: 0,
+          kinds: {},
+          indexed: false,
+          availability: "contract-drift",
+          compatFallback: mcpWasConnected,
+        };
+      }
       // Both the MCP graph path and the CLI compatibility path failed — the
       // graph is unavailable. Report that honestly rather than a fabricated
       // empty overview.
@@ -412,7 +509,7 @@ export class KinClient {
     }
     return this.runWithProgress(
       `Kin: tracing ${entity}...`,
-      () => this.runJson<KinEntity[]>(["trace", entity], 10_000),
+      () => this.runJson(["trace", entity], (raw) => readEntities("trace", raw), 10_000),
       10_000
     );
   }
@@ -474,9 +571,25 @@ export class KinClient {
       }
     }
     try {
-      const status = await this.runJson<KinStatus>(["status"], 5_000);
-      return { ...status, reachable: true };
+      return await this.runJson(["status"], readStatus, 5_000);
     } catch (err) {
+      // The CLI ran, exited 0 and emitted valid JSON in a shape this extension
+      // cannot read. The runtime is reachable and the repository is almost
+      // certainly initialized, so reporting either the reverse would be a
+      // fabrication. Say what is actually true: the versions have drifted.
+      if (err instanceof CliContractError) {
+        return {
+          initialized: false,
+          entityCount: 0,
+          graphState: "contract drift",
+          reachable: true,
+          contractDrift: {
+            command: err.command,
+            missing: err.missing,
+            ...(err.schema ? { schema: err.schema } : {}),
+          },
+        };
+      }
       // Both paths failed. Report that as unreachable rather than collapsing it
       // into "not initialized", which sends the user to a remedy that cannot
       // help them.
@@ -516,7 +629,11 @@ export class KinClient {
     return this.runWithProgress(
       `Kin: reviewing ${relativePath}...`,
       () =>
-        this.runJson<KinReviewResult>(["review", "--files", relativePath], 30_000),
+        this.runJson(
+          ["review", "--files", relativePath],
+          (raw) => readReview(raw, relativePath),
+          30_000
+        ),
       30_000
     );
   }
@@ -530,6 +647,17 @@ export class KinClient {
   ): Promise<KinRenamePlan> {
     // Rename stays CLI for now — it requires the projection pipeline
     // which is not yet exposed as an MCP tool.
+    //
+    // It also carries no contract check, on purpose. `kin rename --json` was
+    // measured against kin 0.6.0 on two freshly initialized repositories, one
+    // Python and one TypeScript, and it refused both with HTTP 409 and an empty
+    // stdout: the graph source carried an extraction-incomplete certificate on
+    // one and an out-of-range span on the other. So there is no observed
+    // success payload to write a contract from, and a contract invented from
+    // the reader's own type would assert nothing about the CLI. This path also
+    // fails loudly rather than silently — a nonzero exit with an empty stdout
+    // rejects through `run()` and reaches the user as an error message — which
+    // is the failure mode the contract layer exists to create, not to prevent.
     const relativePath = this.toRelativeWorkspacePath(filePath);
     return this.runWithProgress(
       `Kin: planning rename for ${symbol}...`,
@@ -546,6 +674,7 @@ export class KinClient {
             "--column",
             String(column),
           ],
+          (raw) => ({ ok: true, value: raw as KinRenamePlan }),
           30_000
         ),
       30_000
@@ -569,7 +698,7 @@ export class KinClient {
     try {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.map(this.normalizeEntity);
+        return parsed.map(normalizeEntity);
       }
 
       if (!this.isRecord(parsed)) {
@@ -579,31 +708,21 @@ export class KinClient {
       for (const key of ["results", "entities", "references"]) {
         const value = parsed[key];
         if (Array.isArray(value)) {
-          return value.map(this.normalizeEntity).filter((entity) => entity.name || entity.file);
+          return value.map(normalizeEntity).filter((entity) => entity.name || entity.file);
         }
       }
 
       if (this.isRecord(parsed.focal_entity)) {
-        return [this.normalizeEntity(parsed.focal_entity)];
+        return [normalizeEntity(parsed.focal_entity)];
       }
       if (typeof parsed.name === "string") {
-        return [this.normalizeEntity(parsed)];
+        return [normalizeEntity(parsed)];
       }
       return [];
     } catch {
       // Not JSON — return empty (caller should fall back to CLI)
       return [];
     }
-  }
-
-  private normalizeEntity(raw: UnknownRecord): KinEntity {
-    return {
-      kind: String(raw.kind ?? raw.entity_kind ?? "Unknown"),
-      name: String(raw.name ?? raw.entity_name ?? ""),
-      file: String(raw.file ?? raw.file_path ?? raw.read_path ?? ""),
-      line: Number(raw.line ?? raw.start_line ?? 1),
-      signature: raw.signature ? String(raw.signature) : undefined,
-    };
   }
 
   private parseOverviewFromMcp(raw: string): KinOverview {
@@ -677,7 +796,7 @@ export class KinClient {
         return {
           file: String(parsed.file ?? filePath),
           findings: parsed.findings.map((finding) =>
-            this.normalizeReviewFinding(finding, filePath)
+            normalizeReviewFinding(asRecord(finding), filePath)
           ),
           summary: String(parsed.summary ?? ""),
         };
@@ -707,18 +826,6 @@ export class KinClient {
     }
   }
 
-  private normalizeReviewFinding(raw: unknown, fallbackFile: string): KinReviewFinding {
-    const finding = this.isRecord(raw) ? raw : {};
-    return {
-      entity: String(finding.entity ?? finding.name ?? ""),
-      kind: String(finding.kind ?? "Review"),
-      file: String(finding.file ?? fallbackFile),
-      line: Number(finding.line ?? finding.start_line ?? 1),
-      severity: this.normalizeSeverity(finding.severity),
-      message: String(finding.message ?? finding.title ?? ""),
-    };
-  }
-
   private normalizeInlineComment(raw: unknown, fallbackFile: string): KinReviewFinding {
     const comment = this.isRecord(raw) ? raw : {};
     return {
@@ -729,12 +836,6 @@ export class KinClient {
       severity: this.inlineCommentSeverity(comment.kind),
       message: String(comment.message ?? ""),
     };
-  }
-
-  private normalizeSeverity(raw: unknown): KinReviewFinding["severity"] {
-    return raw === "error" || raw === "warning" || raw === "info"
-      ? raw
-      : "info";
   }
 
   private inlineCommentSeverity(kind: unknown): KinReviewFinding["severity"] {

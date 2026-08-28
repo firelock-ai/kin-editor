@@ -46,6 +46,12 @@ export function formatSearchResultDetail(entity: KinEntity): string {
 }
 
 export function formatStatusBarText(status: KinStatus): string {
+  // Drift is checked before reachability, because a drifted answer IS a
+  // reachable runtime. Showing "unavailable" here would send the user to check
+  // a binary that is running perfectly well.
+  if (status.contractDrift) {
+    return "$(warning) Kin: version mismatch";
+  }
   if (status.reachable === false) {
     return "$(graph) Kin: unavailable";
   }
@@ -55,6 +61,9 @@ export function formatStatusBarText(status: KinStatus): string {
 }
 
 export function formatStatusBarTooltip(status: KinStatus): string {
+  if (status.contractDrift) {
+    return formatContractDriftMessage(status.contractDrift);
+  }
   if (status.reachable === false) {
     return "Kin status. The Kin runtime could not be reached. Check that the kin binary is installed and the daemon can start. Click to open the overview.";
   }
@@ -63,10 +72,29 @@ export function formatStatusBarTooltip(status: KinStatus): string {
     : "Kin status. This workspace is not initialized yet. Click to open the overview.";
 }
 
+/**
+ * The user-facing sentence for a drifted CLI. It names the command and the keys
+ * that went missing, because "something is wrong" is not actionable and a user
+ * cannot tell from inside the editor which of the two sides moved.
+ */
+export function formatContractDriftMessage(
+  drift: NonNullable<KinStatus["contractDrift"]>
+): string {
+  const schema = drift.schema ? ` The CLI published contract ${drift.schema}.` : "";
+  return (
+    `Kin status. The kin CLI answered \`kin ${drift.command} --json\` in a shape this ` +
+    `extension cannot read, so no graph state is shown. Missing: ` +
+    `${drift.missing.join(", ")}.${schema} Update the Kin VS Code extension, or update ` +
+    `the kin CLI, so the two agree.`
+  );
+}
+
 export function formatOverviewMessage(overview: KinOverview): string {
   // Distinguish every non-happy graph state honestly instead of presenting
   // fabricated zeros as a real graph. Each state gets its own recovery hint.
   switch (overview.availability) {
+    case "contract-drift":
+      return "the kin CLI answered in a shape this extension cannot read, so no graph state is shown. This is a version mismatch, not an empty graph. Update the Kin VS Code extension, or update the kin CLI, so the two agree.";
     case "not-indexed":
       return "graph not indexed yet — open the workspace setup to index it, or wait for the daemon to finish.";
     case "unavailable":

@@ -1,0 +1,141 @@
+{
+  "capture": {
+    "command": "kin search build_router --json",
+    "kin_version": "kin 0.6.0 (37b6e37b81d5a4f349aa5655afc986f5dc83b1c6 detached 2026-08-26T21:18:16Z)",
+    "captured_at": "2026-08-28T23:25:12.339923Z",
+    "exit_code": 0,
+    "subject": "a three-file Python repository (app.py, config.py, router.py) created for this capture, git-initialised with one commit and indexed by `kin init .`",
+    "note": "Captured verbatim from a real kin binary under a scratch HOME and KIN_HOME with KIN_EMBED_BACKEND=cpu. Do not hand-edit: regenerate by re-running the capture against a new CLI and updating the contract readers to match."
+  },
+  "payload": [
+    {
+      "id": "453321fb-0a75-419b-9ef6-37fc81d61330",
+      "kind": "Function",
+      "name": "build_router",
+      "file": "router.py",
+      "line": 20,
+      "end_line": 25,
+      "match_kind": "name",
+      "signature": "def build_router(config)"
+    },
+    {
+      "id": "04415220-d65b-4e56-955a-eaf97297ac4f",
+      "kind": "Function",
+      "name": "build_app",
+      "file": "app.py",
+      "line": 7,
+      "end_line": 11,
+      "score": 7.824069,
+      "match_kind": "text_fallback",
+      "signature": "def build_app()"
+    },
+    {
+      "id": "3446f712-eb13-46c2-8c79-4fe4c9b7cb4f",
+      "kind": "Module",
+      "name": "app",
+      "file": "app.py",
+      "line": 1,
+      "end_line": 22,
+      "score": 6.466264,
+      "match_kind": "text_fallback",
+      "signature": "module app.py"
+    },
+    {
+      "id": "b1e932df-6b90-4736-b012-faea47320ecb",
+      "kind": "Module",
+      "name": "router",
+      "file": "router.py",
+      "line": 1,
+      "end_line": 26,
+      "score": 5.6794276,
+      "match_kind": "text_fallback",
+      "signature": "module router.py"
+    },
+    {
+      "id": "f8b4a438-bb83-4d5f-b634-7edda0ce79df",
+      "kind": "Method",
+      "name": "Router.add_route",
+      "file": "router.py",
+      "line": 10,
+      "end_line": 13,
+      "score": 4.774373,
+      "match_kind": "text_fallback",
+      "signature": "def add_route(self, path, handler)"
+    },
+    {
+      "id": "52890ae6-53bf-438d-850b-5e08407c38b3",
+      "kind": "Class",
+      "name": "Router",
+      "file": "router.py",
+      "line": 4,
+      "end_line": 17,
+      "score": 4.1017632,
+      "match_kind": "text_fallback",
+      "signature": "class Router"
+    },
+    {
+      "id": "d70ed757-5312-462a-b969-aa47e11b89a2",
+      "kind": "Function",
+      "name": "main",
+      "file": "app.py",
+      "line": 14,
+      "end_line": 17,
+      "score": 3.161311,
+      "match_kind": "text_fallback",
+      "signature": "def main()"
+    },
+    {
+      "id": "79b9752b-5359-4f3b-b53c-9b8f8bc1dce3",
+      "kind": "Method",
+      "name": "Router.__init__",
+      "file": "router.py",
+      "line": 7,
+      "end_line": 8,
+      "score": 2.9924552,
+      "match_kind": "text_fallback",
+      "signature": "def __init__(self)"
+    },
+    {
+      "id": "067890a5-0229-4cd1-ab55-48da4779e3bb",
+      "kind": "Method",
+      "name": "Router.resolve",
+      "file": "router.py",
+      "line": 15,
+      "end_line": 17,
+      "score": 1.6903474,
+      "match_kind": "text_fallback",
+      "signature": "def resolve(self, path)"
+    },
+    {
+      "id": "6f6e7aad-1c95-53f7-a00e-c9f1758a16d3",
+      "kind": "Module",
+      "name": "config.get",
+      "file": "",
+      "line": 1,
+      "score": 1.1369385,
+      "match_kind": "text_fallback",
+      "signature": null
+    },
+    {
+      "id": "9476f131-05c7-4da3-9e03-c422fa2f1847",
+      "kind": "Function",
+      "name": "load_config",
+      "file": "config.py",
+      "line": 6,
+      "end_line": 8,
+      "score": 0.45244056,
+      "match_kind": "text_fallback",
+      "signature": "def load_config(port=DEFAULT_PORT)"
+    },
+    {
+      "id": "e3f7b739-75a6-5e30-821a-c7a7e11d06d5",
+      "kind": "Module",
+      "name": "routes.get",
+      "file": "",
+      "line": 1,
+      "score": 0.41813728,
+      "match_kind": "text_fallback",
+      "signature": null
+    }
+  ]
+}

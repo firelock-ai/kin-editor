@@ -1,0 +1,19 @@
+{
+  "capture": {
+    "command": "kin trace build_router --json",
+    "kin_version": "kin 0.6.0 (37b6e37b81d5a4f349aa5655afc986f5dc83b1c6 detached 2026-08-26T21:18:16Z)",
+    "captured_at": "2026-08-28T23:25:12.527828Z",
+    "exit_code": 0,
+    "subject": "a three-file Python repository (app.py, config.py, router.py) created for this capture, git-initialised with one commit and indexed by `kin init .`",
+    "note": "Captured verbatim from a real kin binary under a scratch HOME and KIN_HOME with KIN_EMBED_BACKEND=cpu. Do not hand-edit: regenerate by re-running the capture against a new CLI and updating the contract readers to match."
+  },
+  "payload": [
+    {
+      "kind": "Function",
+      "name": "build_router",
+      "file": "router.py",
+      "line": 20,
+      "signature": "def build_router(config)"
+    }
+  ]
+}
