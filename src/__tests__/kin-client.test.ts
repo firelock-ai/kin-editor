@@ -2,8 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { execFile } from "child_process";
-import { existsSync } from "fs";
-import { BinaryNotFoundError, ParseError, TimeoutError } from "../errors";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
+import {
+  BinaryNotFoundError,
+  CliContractError,
+  ParseError,
+  TimeoutError,
+} from "../errors";
+
+const mockShowWarningMessage = jest.fn();
 
 // Mock vscode module (not available outside VS Code host)
 jest.mock(
@@ -16,6 +24,7 @@ jest.mock(
     },
     window: {
       withProgress: (_opts: unknown, task: () => Promise<unknown>) => task(),
+      showWarningMessage: (...args: unknown[]) => mockShowWarningMessage(...args),
     },
     ProgressLocation: {
       Notification: 15,
@@ -37,9 +46,27 @@ const mockExistsSync = existsSync as jest.Mock;
 // Import after mocks are set up
 import { KinClient } from "../kin-client";
 
+// `fs` is mocked above, so read the fixtures through the real module. These are
+// the verbatim bytes a real kin 0.6.0 binary wrote; see cli-contract.test.ts.
+const realReadFileSync = jest.requireActual("fs").readFileSync as typeof readFileSync;
+
+interface CliFixture {
+  capture: { command: string; kin_version: string };
+  payload: unknown;
+}
+
+function loadCliFixture(name: string): CliFixture {
+  return JSON.parse(
+    realReadFileSync(join(__dirname, "fixtures", "cli", `${name}.json`), "utf8") as string
+  ) as CliFixture;
+}
+
+const statusFixture = loadCliFixture("status");
+
 describe("KinClient", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockShowWarningMessage.mockClear();
     // Default: no configured binary, no ~/.kin/bin/kin, fall back to "kin" in PATH
     mockExistsSync.mockReturnValue(false);
   });
@@ -272,9 +299,33 @@ describe("KinClient", () => {
           _opts: unknown,
           cb: (err: Error | null, stdout: string, stderr: string) => void
         ) => {
+          cb(null, JSON.stringify(statusFixture.payload), "");
+        }
+      );
+
+      const client = new KinClient("/workspace");
+      const status = await client.status();
+      expect(status.reachable).toBe(true);
+      expect(status.initialized).toBe(true);
+      expect(status.entityCount).toBe(14);
+      expect(status.contractDrift).toBeUndefined();
+    });
+
+    it("reports a drifted CLI as reachable-but-mismatched, not unreachable", async () => {
+      // The shape a pre-0.6 CLI answered with. It parses, so nothing throws;
+      // before the contract check every field read `undefined` and the status
+      // bar showed a confident "not initialized" on a healthy repository.
+      mockExecFile.mockImplementation(
+        (
+          _bin: string,
+          _args: string[],
+          _opts: unknown,
+          cb: (err: Error | null, stdout: string, stderr: string) => void
+        ) => {
           cb(
             null,
             JSON.stringify({
+              version: 1,
               initialized: false,
               entityCount: 0,
               graphState: "uninitialized",
@@ -286,8 +337,19 @@ describe("KinClient", () => {
 
       const client = new KinClient("/workspace");
       const status = await client.status();
+      // Reachable, because the binary ran and answered.
       expect(status.reachable).toBe(true);
-      expect(status.initialized).toBe(false);
+      expect(status.contractDrift).toEqual({
+        command: "status",
+        missing: ["schema", "repository", "semantic_enrichment"],
+      });
+      expect(mockShowWarningMessage).toHaveBeenCalledTimes(1);
+      expect(mockShowWarningMessage.mock.calls[0][0]).toContain(
+        "kin status --json"
+      );
+      expect(mockShowWarningMessage.mock.calls[0][0]).toContain(
+        "semantic_enrichment"
+      );
     });
   });
 
@@ -559,6 +621,147 @@ describe("KinClient", () => {
         { query: "myFunc", limit: 50, compact: true },
         15_000
       );
+    });
+  });
+  // -------------------------------------------------------------------------
+  // The CLI fallback contract, end to end through the client
+  // -------------------------------------------------------------------------
+  describe("CLI fallback contract", () => {
+    function serve(payload: unknown): void {
+      mockExecFile.mockImplementation(
+        (
+          _bin: string,
+          _args: string[],
+          _opts: unknown,
+          cb: (err: Error | null, stdout: string, stderr: string) => void
+        ) => {
+          cb(null, JSON.stringify(payload), "");
+        }
+      );
+    }
+
+    /** The argv the client actually passed, rendered the way a fixture names it. */
+    function invokedCommand(): string {
+      const args = mockExecFile.mock.calls[0][1] as string[];
+      return ["kin", ...args].join(" ");
+    }
+
+    // The join. Each fixture names the command that produced it exactly once,
+    // in the fixture, and this derives the other half from what the client
+    // actually spawned. Nothing hardcodes the command string twice, so renaming
+    // a subcommand on either side has to break a test.
+    it.each([
+      ["status", () => new KinClient("/workspace").status()],
+      ["overview", () => new KinClient("/workspace").overview()],
+      ["search", () => new KinClient("/workspace").search("build_router")],
+      ["trace", () => new KinClient("/workspace").trace("build_router")],
+      ["review", () => new KinClient("/workspace").review("/workspace/app.py")],
+    ] as const)(
+      "%s spawns exactly the command its fixture was captured from",
+      async (name, call) => {
+        const fixture = loadCliFixture(name);
+        serve(fixture.payload);
+        await call();
+        expect(invokedCommand()).toBe(fixture.capture.command);
+      }
+    );
+
+    it("reads the real status payload with no warning", async () => {
+      serve(loadCliFixture("status").payload);
+      const status = await new KinClient("/workspace").status();
+      expect(status.entityCount).toBe(14);
+      expect(status.graphState).toBe("present, completion not attested");
+      // The must-stay-silent control. An intact answer that still warns is a
+      // guard that cries wolf, and a user learns to dismiss it.
+      expect(mockShowWarningMessage).not.toHaveBeenCalled();
+    });
+
+    it("reads the real overview payload with no warning", async () => {
+      serve(loadCliFixture("overview").payload);
+      const overview = await new KinClient("/workspace").overview();
+      expect(overview.entities).toBe(14);
+      expect(overview.availability).toBe("indexed");
+      expect(mockShowWarningMessage).not.toHaveBeenCalled();
+    });
+
+    it("reads the real search payload with no warning", async () => {
+      serve(loadCliFixture("search").payload);
+      const results = await new KinClient("/workspace").search("build_router");
+      expect(results).toHaveLength(12);
+      expect(results[0].name).toBe("build_router");
+      expect(results[0].file).toBe("router.py");
+      expect(mockShowWarningMessage).not.toHaveBeenCalled();
+    });
+
+    it("reads the real trace payload with no warning", async () => {
+      serve(loadCliFixture("trace").payload);
+      const results = await new KinClient("/workspace").trace("build_router");
+      expect(results).toHaveLength(1);
+      expect(results[0].line).toBe(20);
+      expect(mockShowWarningMessage).not.toHaveBeenCalled();
+    });
+
+    it("reads the real review payload with no warning", async () => {
+      serve(loadCliFixture("review").payload);
+      const review = await new KinClient("/workspace").review("/workspace/app.py");
+      expect(review.findings).toHaveLength(3);
+      expect(review.summary).toBe("Overall risk: Low; 3 finding(s)");
+      expect(mockShowWarningMessage).not.toHaveBeenCalled();
+    });
+
+    it("throws a named CliContractError on a drifted search answer", async () => {
+      // The 0.5-era search shape: an object, not an array.
+      serve({ entities: [], files: [], summary: "none" });
+      await expect(new KinClient("/workspace").search("x")).rejects.toThrow(
+        CliContractError
+      );
+      expect(mockShowWarningMessage).toHaveBeenCalledTimes(1);
+      expect(mockShowWarningMessage.mock.calls[0][0]).toContain("kin search --json");
+    });
+
+    it("throws rather than handing review-provider a findings-less object", async () => {
+      // Before the contract check this returned an object with no findings key,
+      // and the provider dereferenced .findings.length on undefined.
+      serve({ risk: { overall_risk: "Low" }, inline_comments: [] });
+      await expect(
+        new KinClient("/workspace").review("/workspace/app.py")
+      ).rejects.toThrow(CliContractError);
+      expect(mockShowWarningMessage.mock.calls[0][0]).toContain("file, findings, summary");
+    });
+
+    it("reports overview drift as contract-drift, not as an unavailable graph", async () => {
+      serve({ nodes: 3 });
+      const overview = await new KinClient("/workspace").overview();
+      expect(overview.availability).toBe("contract-drift");
+      expect(overview.entities).toBe(0);
+    });
+
+    it("warns once per distinct drift, not once per call", async () => {
+      serve({ version: 1, initialized: true, entityCount: 3, graphState: "ok" });
+      const client = new KinClient("/workspace");
+      await client.status();
+      await client.status();
+      await client.status();
+      expect(mockShowWarningMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("still reports the drift when the notification itself fails", async () => {
+      // A failed notification must not replace a precise diagnosis with
+      // whatever the UI threw, which the caller would report as unreachable.
+      mockShowWarningMessage.mockImplementationOnce(() => {
+        throw new Error("notification host is gone");
+      });
+      serve({ version: 1, initialized: true, entityCount: 3, graphState: "ok" });
+      const status = await new KinClient("/workspace").status();
+      expect(status.reachable).toBe(true);
+      expect(status.contractDrift?.command).toBe("status");
+    });
+
+    it("does not warn on a query that simply found nothing", async () => {
+      serve([]);
+      const results = await new KinClient("/workspace").search("nothing_matches_this");
+      expect(results).toEqual([]);
+      expect(mockShowWarningMessage).not.toHaveBeenCalled();
     });
   });
 });

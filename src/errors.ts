@@ -39,3 +39,31 @@ export class ParseError extends KinError {
     }
   }
 }
+
+/**
+ * A `kin <command> --json` call succeeded and parsed, but answered in a shape
+ * the CLI fallback reader cannot use. This is its own error because it is not a
+ * failure of the runtime: the binary ran, exited 0 and emitted valid JSON. The
+ * two sides have simply drifted, and the remedy is a version change rather than
+ * a retry.
+ */
+export class CliContractError extends KinError {
+  readonly command: string;
+  readonly missing: readonly string[];
+  readonly schema?: string;
+
+  constructor(
+    command: string,
+    missing: readonly string[],
+    message: string,
+    schema?: string
+  ) {
+    super(message);
+    this.name = "CliContractError";
+    this.command = command;
+    this.missing = missing;
+    if (schema) {
+      this.schema = schema;
+    }
+  }
+}

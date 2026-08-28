@@ -16,6 +16,7 @@ import { initLogger, log } from "./logger";
 import { WorkspaceManager } from "./workspace-manager";
 import {
   describeError,
+  formatContractDriftMessage,
   formatOverviewMessage,
 } from "./accessibility";
 
@@ -278,7 +279,11 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!resolved) return;
       try {
         const status = await resolved.client.status();
-        if (status.reachable === false) {
+        if (status.contractDrift) {
+          vscode.window.showWarningMessage(
+            formatContractDriftMessage(status.contractDrift)
+          );
+        } else if (status.reachable === false) {
           vscode.window.showErrorMessage(
             "Kin could not be reached in this workspace. Check that the kin binary is installed and the daemon can start, then run Kin: Show Status again."
           );

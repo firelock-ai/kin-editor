@@ -216,6 +216,8 @@ function infoNodeForAvailability(
   availability: GraphAvailability
 ): InfoNode | undefined {
   switch (availability) {
+    case "contract-drift":
+      return graphContractDriftNode();
     case "not-indexed":
       return graphNotIndexedNode();
     case "unavailable":
@@ -237,6 +239,15 @@ function graphNotIndexedNode(): InfoNode {
     message: "Graph not indexed yet",
     tooltip:
       "Kin has not indexed this workspace yet. Run Kin: Setup Workspace or wait for the daemon to finish indexing, then refresh.",
+  };
+}
+
+function graphContractDriftNode(): InfoNode {
+  return {
+    type: "info",
+    message: "Kin CLI version mismatch",
+    tooltip:
+      "The kin CLI answered in a shape this extension cannot read. This is a version mismatch, not an empty graph. Update the Kin VS Code extension, or update the kin CLI, so the two agree, then refresh.",
   };
 }
 
