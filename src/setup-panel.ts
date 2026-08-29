@@ -6,8 +6,8 @@ import {
   HealthCheck,
   HealthReport,
   HealthStatusValue,
+  composeReadiness,
   hasFixableChecks,
-  isFailing,
   resolveKinBinary,
   runSetupStatus,
 } from "./setup-health";
@@ -24,6 +24,11 @@ const STATUS_GLYPH: Record<HealthStatusValue, string> = {
   missing: "✗",
   misconfigured: "✗",
   stale: "!",
+  // Work still in flight, not a fault. It reads as motion rather than as a
+  // cross, because both of these normalized to `missing` before and a fresh
+  // install's model download rendered as a red Missing row.
+  pending: "…",
+  degraded: "!",
   unsupported: "→",
 };
 
@@ -32,6 +37,8 @@ const STATUS_LABEL: Record<HealthStatusValue, string> = {
   missing: "Missing",
   misconfigured: "Misconfigured",
   stale: "Stale",
+  pending: "Working",
+  degraded: "Degraded",
   unsupported: "Not supported",
 };
 
@@ -88,7 +95,7 @@ async function refresh(
   try {
     const report = await runSetupStatus(cwd);
     log(
-      `Setup Workspace: health report — ${report.checks.length} checks, healthy=${report.healthy}`
+      `Setup Workspace: health report — ${report.checks.length} checks, verdict=${report.verdict} (${report.verdictSource})`
     );
     panel.webview.html = reportHtml(panel.webview, report);
   } catch (err) {
@@ -218,12 +225,16 @@ h1 { font-size: 1.4em; margin: 0 0 4px; }
 .banner { padding: 10px 12px; border-radius: 4px; margin-bottom: 16px; }
 .banner.ok { background: var(--vscode-inputValidation-infoBackground, rgba(100,180,100,0.12)); border: 1px solid var(--vscode-charts-green, #4caf50); }
 .banner.warn { background: var(--vscode-inputValidation-warningBackground, rgba(200,160,40,0.12)); border: 1px solid var(--vscode-charts-yellow, #d8a000); }
+.banner.bad { background: var(--vscode-inputValidation-errorBackground, rgba(220,80,80,0.12)); border: 1px solid var(--vscode-charts-red, #f14c4c); }
+.banner .advice { margin-top: 6px; }
+.banner .note { margin: 6px 0 0; color: var(--vscode-descriptionForeground); font-style: italic; }
 .check { border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.3)); border-radius: 4px; padding: 10px 12px; margin-bottom: 10px; }
 .check-head { display: flex; align-items: baseline; gap: 8px; }
 .glyph { font-weight: bold; width: 1.2em; text-align: center; }
 .glyph.healthy { color: var(--vscode-charts-green, #4caf50); }
 .glyph.missing, .glyph.misconfigured { color: var(--vscode-charts-red, #f14c4c); }
-.glyph.stale { color: var(--vscode-charts-yellow, #d8a000); }
+.glyph.stale, .glyph.degraded { color: var(--vscode-charts-yellow, #d8a000); }
+.glyph.pending { color: var(--vscode-charts-blue, #3794ff); }
 .glyph.unsupported { color: var(--vscode-charts-blue, #3794ff); }
 .check-label { font-weight: 600; }
 .check-status { color: var(--vscode-descriptionForeground); font-size: 0.85em; margin-left: auto; }
@@ -299,12 +310,33 @@ function looksRunnable(manualFix: string): boolean {
   return /^(kin|cargo|rm|npm|npx|git)\b/.test(trimmed);
 }
 
+/**
+ * Render the readiness banner from the report's verdict.
+ *
+ * Keyed on {@link composeReadiness} rather than on `report.healthy`, because
+ * that boolean collapses "still warming up" and "broken" into one false, and a
+ * banner reading it renders a fresh install's model download as a failure.
+ */
+export function bannerHtml(report: HealthReport): string {
+  const line = composeReadiness(report);
+  const parts = [
+    `<div class="banner ${line.tone}">`,
+    `<div>${escapeHtml(line.headline)}</div>`,
+    `<div class="advice">${escapeHtml(line.advice)}</div>`,
+  ];
+  if (line.disagreementNote) {
+    parts.push(`<p class="note">${escapeHtml(line.disagreementNote)}</p>`);
+  }
+  if (line.sourceNote) {
+    parts.push(`<p class="note">${escapeHtml(line.sourceNote)}</p>`);
+  }
+  parts.push(`</div>`);
+  return parts.join("");
+}
+
 function reportHtml(webview: vscode.Webview, report: HealthReport): string {
   const scriptNonce = nonce();
-  const failing = report.checks.filter((c) => isFailing(c.status)).length;
-  const banner = report.healthy
-    ? `<div class="banner ok">Kin is ready in this workspace. You can run a semantic search now.</div>`
-    : `<div class="banner warn">${failing} check${failing === 1 ? "" : "s"} need attention before Kin is fully wired in this workspace.</div>`;
+  const banner = bannerHtml(report);
 
   const toolbarButtons: string[] = [];
   toolbarButtons.push(
@@ -320,7 +352,7 @@ function reportHtml(webview: vscode.Webview, report: HealthReport): string {
       `<button class="secondary" data-command="init">Initialize Repository</button>`
     );
   }
-  if (report.healthy) {
+  if (report.verdict === "ready") {
     toolbarButtons.push(
       `<button class="secondary" data-command="search">Try a semantic search</button>`
     );
