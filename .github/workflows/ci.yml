@@ -39,6 +39,25 @@ jobs:
       - run: npm run compile
       - run: npm run lint
       - run: npm test
+      # The packager is what a release actually runs, and nothing on a pull
+      # request used to run it. A dependabot bump moved @types/vscode past
+      # engines.vscode and every check stayed green, so the mismatch was only
+      # ever going to surface at tag time, on a tag that resolves its workflows
+      # from itself and cannot be repaired by a later fix on main.
+      #
+      # This is a step inside the existing required 'test' context rather than a
+      # new job, so it reports on the pull_request event with no ruleset change.
+      # TAG_NAME is derived from package.json at run time so the check grades the
+      # version that will actually be tagged rather than one typed in here.
+      - name: Package VSIX (the script release.yml runs)
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          TAG_NAME="v${version}" node ./scripts/package-vsix.mjs
+          # Assert the artifact, not just the exit code: a packager that stops
+          # writing a file would otherwise pass this step silently.
+          test -f "kin-${version}.vsix"
+          echo "packaged kin-${version}.vsix"
       - name: Audit (high/critical)
         run: npm audit --audit-level=high
 
