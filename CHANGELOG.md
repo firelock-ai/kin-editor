@@ -2,6 +2,12 @@
 
 All notable changes to the Kin VS Code extension are documented in this file.
 
+## [0.1.5] - 2026-08-29
+
+### Changed
+
+- Unblock the packager and make a types-versus-engines mismatch fail on the PR (#78)
+
 ## [0.1.4] - 2026-08-29
 
 ### Changed
