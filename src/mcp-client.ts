@@ -41,6 +41,47 @@ export interface McpToolResult {
   isError?: boolean;
 }
 
+/**
+ * A tool call the server answered with `isError`. Carries the server's own text
+ * so a caller can show it, and a `warming` flag so a caller can tell "ask me
+ * again in a moment" apart from "this failed".
+ */
+export class McpToolError extends Error {
+  readonly toolName: string;
+  readonly text: string;
+  readonly warming: boolean;
+
+  constructor(toolName: string, text: string) {
+    super(`MCP tool ${toolName} error: ${text}`);
+    this.name = "McpToolError";
+    this.toolName = toolName;
+    this.text = text;
+    this.warming = isWarmingText(text);
+  }
+}
+
+/**
+ * Phrases `kin mcp start` uses when the transport is up but the repo daemon has
+ * not finished starting. Measured verbatim from a cold `kin 0.6.0` daemon; the
+ * captured reply is checked in at `src/__tests__/fixtures/mcp/warming.json`.
+ *
+ * This is a text signal, which is not something to be happy about, but the
+ * server publishes no structured code for the condition and the alternative is
+ * treating "retry me" as "there is nothing here". Any one marker is enough, so
+ * a reworded sentence has to lose all of them before the signal is lost, and
+ * the negative control in the tests is a genuine error that must not match.
+ */
+const WARMING_MARKERS = [
+  "is still starting",
+  "retry this call once the daemon is ready",
+  "startup latency, not a failure",
+];
+
+export function isWarmingText(text: string): boolean {
+  const haystack = text.toLowerCase();
+  return WARMING_MARKERS.some((marker) => haystack.includes(marker.toLowerCase()));
+}
+
 /** Pending request awaiting a response. */
 interface PendingRequest {
   resolve: (value: JsonRpcResponse) => void;
@@ -408,15 +449,18 @@ export class McpClient implements vscode.Disposable {
     }
 
     const result = response.result as McpToolResult | undefined;
-    if (!result || !result.content || result.content.length === 0) {
-      return "{}";
+
+    // `isError` is read BEFORE the empty-content shortcut below. The other
+    // order let an error result with no content blocks return "{}", which every
+    // parser above reads as an empty answer, so a failed call was
+    // indistinguishable from a graph with nothing in it.
+    if (result?.isError) {
+      const errorText = (result.content ?? []).map((c) => c.text).join("\n");
+      throw new McpToolError(toolName, errorText || "(no detail)");
     }
 
-    if (result.isError) {
-      const errorText = result.content
-        .map((c) => c.text)
-        .join("\n");
-      throw new Error(`MCP tool ${toolName} error: ${errorText}`);
+    if (!result || !result.content || result.content.length === 0) {
+      return "{}";
     }
 
     return result.content.map((c) => c.text).join("\n");

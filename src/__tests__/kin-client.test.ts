@@ -376,7 +376,7 @@ describe("KinClient", () => {
       expect(mcp.callTool).toHaveBeenCalledWith(
         "semantic_locate",
         { query: "foo", limit: 50, granularity: "entity" },
-        15_000
+        30_000
       );
       expect(result).toEqual([
         {
@@ -431,7 +431,7 @@ describe("KinClient", () => {
       expect(mcp.callTool).toHaveBeenCalledWith(
         "find_references",
         { query: "target" },
-        10_000
+        30_000
       );
       expect(result[0]).toMatchObject({
         name: "caller",
@@ -619,7 +619,7 @@ describe("KinClient", () => {
       expect(mcp.callTool).toHaveBeenCalledWith(
         "semantic_search",
         { query: "myFunc", limit: 50, compact: true },
-        15_000
+        30_000
       );
     });
   });

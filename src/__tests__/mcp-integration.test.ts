@@ -53,7 +53,7 @@ jest.mock("../logger", () => ({
   logError: jest.fn(),
 }));
 
-import { McpClient } from "../mcp-client";
+import { McpClient, McpToolError } from "../mcp-client";
 import { KinClient } from "../kin-client";
 
 jest.setTimeout(20_000);
@@ -211,5 +211,43 @@ describe("MCP live integration — full KinClient stack (beyond mocks)", () => {
     expect(overview.availability).toBe("invalid-response");
     expect(overview.entities).toBe(0);
     expect(overview.indexed).toBe(false);
+  });
+  describe("isError results (real stdio transport)", () => {
+    it("throws on an error result that carries NO content blocks", async () => {
+      // The ordering bug. The empty-content shortcut used to run BEFORE the
+      // isError check, so this exact shape returned "{}" and every parser above
+      // read it as an empty graph rather than as a failed call.
+      const client = await connectClient(makeWorkspace());
+      await expect(
+        client.callTool("__is_error_empty_content__", {})
+      ).rejects.toThrow(McpToolError);
+    });
+
+    it("marks a warming error result as warming, carrying the server's text", async () => {
+      const client = await connectClient(makeWorkspace());
+      let caught: unknown;
+      try {
+        await client.callTool("__is_error_warming__", {});
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(McpToolError);
+      const err = caught as McpToolError;
+      expect(err.warming).toBe(true);
+      expect(err.text).toContain("retry this call once the daemon is ready");
+    });
+
+    it("does not mark an ordinary error result as warming", async () => {
+      // The control: an error with no warming language must stay a failure, or
+      // every error becomes an infinite retry.
+      const client = await connectClient(makeWorkspace());
+      let caught: unknown;
+      try {
+        await client.callTool("__is_error_empty_content__", {});
+      } catch (err) {
+        caught = err;
+      }
+      expect((caught as McpToolError).warming).toBe(false);
+    });
   });
 });

@@ -216,6 +216,8 @@ function infoNodeForAvailability(
   availability: GraphAvailability
 ): InfoNode | undefined {
   switch (availability) {
+    case "warming":
+      return graphWarmingNode();
     case "contract-drift":
       return graphContractDriftNode();
     case "not-indexed":
@@ -239,6 +241,15 @@ function graphNotIndexedNode(): InfoNode {
     message: "Graph not indexed yet",
     tooltip:
       "Kin has not indexed this workspace yet. Run Kin: Setup Workspace or wait for the daemon to finish indexing, then refresh.",
+  };
+}
+
+function graphWarmingNode(): InfoNode {
+  return {
+    type: "info",
+    message: "Kin graph is starting up",
+    tooltip:
+      "The Kin daemon is still starting, so the graph has nothing to show yet. This is startup latency, not an empty graph. A large repository can take minutes on a cold start. Refresh once it is ready.",
   };
 }
 

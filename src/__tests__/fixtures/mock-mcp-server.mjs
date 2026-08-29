@@ -90,6 +90,32 @@ function handleToolCall(id, name) {
       sendResult(id, toolText("the daemon is still warming up, not json"));
       return;
     }
+    case "__is_error_empty_content__": {
+      // An error result carrying NO content blocks. This is the shape that used
+      // to slip past the isError check, because the empty-content shortcut ran
+      // first and returned "{}", which every parser reads as an empty graph.
+      send({ jsonrpc: "2.0", id, result: { content: [], isError: true } });
+      return;
+    }
+    case "__is_error_warming__": {
+      send({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          content: [
+            {
+              type: "text",
+              text:
+                "kin-mcp cannot answer 'semantic_locate' yet: the repo daemon is still starting " +
+                "(phase: resolving or spawning the repo daemon process; 10s so far). " +
+                "retry this call once the daemon is ready.",
+            },
+          ],
+          isError: true,
+        },
+      });
+      return;
+    }
     case "__protocol_error__": {
       sendError(id, -32000, "simulated tool failure");
       return;

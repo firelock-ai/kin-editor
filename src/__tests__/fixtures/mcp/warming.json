@@ -1,0 +1,23 @@
+{
+  "capture": {
+    "tool": "semantic_locate",
+    "arguments": {
+      "query": "<user query>",
+      "limit": 50,
+      "granularity": "entity"
+    },
+    "isError": true,
+    "elapsed_ms": 10002,
+    "kin_version": "kin 0.6.0",
+    "provenance": "TRANSCRIBED, not captured by this lane. The payload text below is quoted verbatim from .kin-coord/reports/coldwalk-20260828.md finding 8, where it was measured against a cold kin 0.6.0 daemon in a scratch axum store at 23:24:16Z to 23:25:00Z on 2026-08-28. This lane tried twice to reproduce it against its own three-file Python store and could not: both the cold arm AND the warm control timed out identically at 60s in the probe, so the probe was what got measured rather than the product, and neither arm is evidence. See the lane report. The arguments are exactly what KinClient.search() sends."
+  },
+  "text": "kin-mcp cannot answer 'semantic_locate' yet: the repo daemon is still starting (phase: resolving or spawning the repo daemon process; 10s so far). The MCP transport is up and `initialize` and `tools/list` are served; retry this call once the daemon is ready. Large repositories can take minutes on a fully cold start. This is startup latency, not a failure: do not restart the MCP server or re-run `kin init`.",
+  "not_warming": {
+    "text": "kin rename refused (HTTP 409): graph source router.py carries an explicit extraction-incomplete certificate; exhaustive rename-reference coverage is unproven",
+    "provenance": "A real kin 0.6.0 refusal captured by this lane on 2026-08-28 while measuring the CLI contract. Used as the negative control: a genuine failure must never classify as warming, or every error becomes an infinite retry. An invented control sentence would prove nothing about what the producer actually says."
+  },
+  "not_warming_second": {
+    "text": "reference_enrichment_unsupported: no language server for Rust is installed on this host, so no cross-file reference or override edge was ever produced for it, so an empty result cannot separate a symbol nothing uses from one this graph could never have linked",
+    "provenance": "Quoted from coldwalk-20260828.md, a real limiting-factor sentence from the same MCP surface. Second negative control."
+  }
+}
