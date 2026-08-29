@@ -23,7 +23,7 @@ import {
   TimeoutError,
   ParseError,
 } from "./errors";
-import { McpClient } from "./mcp-client";
+import { McpClient, McpToolError } from "./mcp-client";
 import { log, logError } from "./logger";
 import {
   ContractDrift,
@@ -72,6 +72,12 @@ export interface KinStatus {
     missing: readonly string[];
     schema?: string;
   };
+  /**
+   * The server's own "still starting" text, set when the graph is warming. A
+   * warming daemon is reachable and the repository is fine; it is neither an
+   * empty graph nor a failure, and the UI has to be able to say the third thing.
+   */
+  warming?: string;
 }
 
 /**
@@ -86,7 +92,8 @@ export type GraphAvailability =
   | "not-indexed" // reachable, but this workspace is not indexed yet
   | "unavailable" // the daemon / binary could not be reached
   | "invalid-response" // a response arrived but could not be parsed as graph data
-  | "contract-drift"; // a valid response arrived in a shape this extension cannot read
+  | "contract-drift" // a valid response arrived in a shape this extension cannot read
+  | "warming"; // the daemon is still starting and asked to be retried
 
 export interface KinOverview {
   entities: number;
@@ -158,6 +165,40 @@ export interface KinRenamePlan {
   warnings: string[];
 }
 
+/**
+ * How long to keep honouring a warming reply before giving up on it.
+ *
+ * A cold `kin mcp start` answers `isError` with "the repo daemon is still
+ * starting ... retry this call once the daemon is ready" and says large
+ * repositories can take minutes. Measured on a cold daemon, that reply arrives
+ * about ten seconds in, so a caller that treats it as a failure gives up on the
+ * very first query a new user runs. These bounds retry for a while and then
+ * report the warming state rather than pretending the graph is empty.
+ */
+const WARMUP_TOTAL_BUDGET_MS = 90_000;
+const WARMUP_FIRST_BACKOFF_MS = 1_000;
+const WARMUP_MAX_BACKOFF_MS = 8_000;
+
+/**
+ * Retry bounds, overridable so tests can exercise the schedule without waiting
+ * real seconds. Nothing user-facing sets these; the defaults are the product.
+ */
+export interface WarmupBounds {
+  totalBudgetMs: number;
+  firstBackoffMs: number;
+  maxBackoffMs: number;
+}
+
+const DEFAULT_WARMUP: WarmupBounds = {
+  totalBudgetMs: WARMUP_TOTAL_BUDGET_MS,
+  firstBackoffMs: WARMUP_FIRST_BACKOFF_MS,
+  maxBackoffMs: WARMUP_MAX_BACKOFF_MS,
+};
+
+function isWarmingError(err: unknown): err is McpToolError {
+  return err instanceof McpToolError && err.warming;
+}
+
 function asRecord(value: unknown): UnknownRecord {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as UnknownRecord)
@@ -187,10 +228,17 @@ export class KinClient {
   /** Contract drifts and schema notes already shown, so each is shown once. */
   private reportedContractIssues = new Set<string>();
 
-  constructor(workspacePath: string, mcpClient?: McpClient) {
+  private readonly warmup: WarmupBounds;
+
+  constructor(
+    workspacePath: string,
+    mcpClient?: McpClient,
+    warmup?: Partial<WarmupBounds>
+  ) {
     this.workspacePath = workspacePath;
     this.binaryPath = this.resolveBinary();
     this.mcpClient = mcpClient ?? null;
+    this.warmup = { ...DEFAULT_WARMUP, ...warmup };
     log(`KinClient initialized — binary: ${this.binaryPath ?? "not found"}, mcp: ${mcpClient ? "provided" : "none"}`);
   }
 
@@ -206,6 +254,64 @@ export class KinClient {
   /** Whether MCP is available for graph-first queries. */
   isMcpConnected(): boolean {
     return this.mcpClient?.isConnected() ?? false;
+  }
+
+  /**
+   * How long an interactive query may take before it is treated as a timeout.
+   *
+   * The old fixed 15 s was under the observed range: a warm `semantic_locate`
+   * on a loaded host measured 11.7 s on one run and 24.0 s on another, and the
+   * second would have thrown, been caught, and dropped the query onto the CLI
+   * fallback for no reason but host load. The default is widened to 30 s and
+   * `kin.queryTimeoutMs` makes it configurable, because how long this takes
+   * depends on the repository and the machine rather than on anything the
+   * extension can know.
+   */
+  private queryTimeoutMs(): number {
+    const configured = vscode.workspace
+      .getConfiguration("kin")
+      .get<number>("queryTimeoutMs");
+    return typeof configured === "number" && configured > 0
+      ? configured
+      : 30_000;
+  }
+
+  /**
+   * Call an MCP tool, honouring a warming reply instead of discarding it.
+   *
+   * A cold daemon answers `isError` with its own "still starting, retry this
+   * call once the daemon is ready" text. Treating that as a failure is what
+   * turned a first query into an empty pane: the error was caught, the CLI
+   * fallback ran, and the user saw nothing with no error and no retry. Here the
+   * retry the server asked for actually happens, the server's own sentence is
+   * shown once so the wait is legible, and a warming state that outlives the
+   * budget is raised as a warming error rather than flattened into an empty
+   * result.
+   */
+  private async callToolWarm(
+    toolName: string,
+    args: Record<string, unknown>,
+    timeoutMs: number
+  ): Promise<string> {
+    const deadline = Date.now() + this.warmup.totalBudgetMs;
+    let backoff = this.warmup.firstBackoffMs;
+    for (;;) {
+      try {
+        return await this.mcpClient!.callTool(toolName, args, timeoutMs);
+      } catch (err) {
+        if (!isWarmingError(err)) {
+          throw err;
+        }
+        // The server's own words, once. It names the phase and the elapsed
+        // time, which is more useful than anything this extension could write.
+        this.showOnce(`warming:${toolName}`, `Kin is starting up. ${err.text}`);
+        if (Date.now() + backoff >= deadline) {
+          throw err;
+        }
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+        backoff = Math.min(backoff * 2, this.warmup.maxBackoffMs);
+      }
+    }
   }
 
   private resolveBinary(): string | undefined {
@@ -378,13 +484,19 @@ export class KinClient {
   async search(query: string): Promise<KinEntity[]> {
     if (this.isMcpConnected()) {
       try {
-        const raw = await this.mcpClient!.callTool(
+        const raw = await this.callToolWarm(
           "semantic_locate",
           { query, limit: 50, granularity: "entity" },
-          15_000,
+          this.queryTimeoutMs(),
         );
         return this.parseEntitiesFromMcp(raw);
       } catch (err) {
+        // A daemon that is still starting is not a failure to fall back from.
+        // Dropping it onto the CLI is what turned a first query into an empty
+        // pane with no error and no retry.
+        if (isWarmingError(err)) {
+          throw err;
+        }
         logError("MCP semantic_locate failed, falling back to CLI", err);
       }
     }
@@ -404,13 +516,16 @@ export class KinClient {
   async symbolSearch(query: string): Promise<KinEntity[]> {
     if (this.isMcpConnected()) {
       try {
-        const raw = await this.mcpClient!.callTool(
+        const raw = await this.callToolWarm(
           "semantic_search",
           { query, limit: 50, compact: true },
-          15_000,
+          this.queryTimeoutMs(),
         );
         return this.parseEntitiesFromMcp(raw);
       } catch (err) {
+        if (isWarmingError(err)) {
+          throw err;
+        }
         logError("MCP semantic_search failed, falling back to CLI", err);
       }
     }
@@ -424,13 +539,16 @@ export class KinClient {
   async entities(): Promise<KinEntity[]> {
     if (this.isMcpConnected()) {
       try {
-        const raw = await this.mcpClient!.callTool(
+        const raw = await this.callToolWarm(
           "semantic_search",
           { query: "", limit: 5000, compact: true },
-          30_000,
+          Math.max(30_000, this.queryTimeoutMs()),
         );
         return this.parseEntitiesFromMcp(raw);
       } catch (err) {
+        if (isWarmingError(err)) {
+          throw err;
+        }
         logError("MCP entity load failed, falling back to CLI", err);
       }
     }
@@ -445,13 +563,20 @@ export class KinClient {
     const mcpWasConnected = this.isMcpConnected();
     if (mcpWasConnected) {
       try {
-        const raw = await this.mcpClient!.callTool(
-          "kin_graph_status",
-          {},
-          10_000,
-        );
+        const raw = await this.callToolWarm("kin_graph_status", {}, 10_000);
         return this.parseOverviewFromMcp(raw);
       } catch (err) {
+        if (isWarmingError(err)) {
+          return {
+            entities: 0,
+            edges: 0,
+            files: 0,
+            kinds: {},
+            indexed: false,
+            availability: "warming",
+            compatFallback: false,
+          };
+        }
         logError("MCP kin_graph_status failed, falling back to CLI", err);
         // Degrade to the CLI compatibility path below.
       }
@@ -497,13 +622,16 @@ export class KinClient {
   async trace(entity: string): Promise<KinEntity[]> {
     if (this.isMcpConnected()) {
       try {
-        const raw = await this.mcpClient!.callTool(
+        const raw = await this.callToolWarm(
           "find_references",
           { query: entity },
-          10_000,
+          this.queryTimeoutMs(),
         );
         return this.parseEntitiesFromMcp(raw);
       } catch (err) {
+        if (isWarmingError(err)) {
+          throw err;
+        }
         logError("MCP find_references failed, falling back to CLI", err);
       }
     }
@@ -560,13 +688,18 @@ export class KinClient {
   async status(): Promise<KinStatus> {
     if (this.isMcpConnected()) {
       try {
-        const raw = await this.mcpClient!.callTool(
-          "kin_graph_status",
-          {},
-          5_000,
-        );
+        const raw = await this.callToolWarm("kin_graph_status", {}, 5_000);
         return this.parseStatusFromMcp(raw);
       } catch (err) {
+        if (isWarmingError(err)) {
+          return {
+            initialized: false,
+            entityCount: 0,
+            graphState: "starting",
+            reachable: true,
+            warming: err.text,
+          };
+        }
         logError("MCP kin_graph_status failed, falling back to CLI", err);
       }
     }
@@ -612,10 +745,10 @@ export class KinClient {
     const relativePath = this.toRelativeWorkspacePath(filePath);
     if (this.isMcpConnected()) {
       try {
-        const raw = await this.mcpClient!.callTool(
+        const raw = await this.callToolWarm(
           "semantic_review",
           { files: [relativePath], include_traffic: false, format: "json" },
-          30_000,
+          Math.max(30_000, this.queryTimeoutMs()),
         );
         const review = this.parseReviewFromMcp(raw, relativePath);
         if (review) {
@@ -623,6 +756,9 @@ export class KinClient {
         }
         throw new Error("MCP semantic_review returned unstructured text");
       } catch (err) {
+        if (isWarmingError(err)) {
+          throw err;
+        }
         logError("MCP semantic_review failed, falling back to CLI", err);
       }
     }

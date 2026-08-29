@@ -172,6 +172,12 @@
           "default": "",
           "description": "Path to the kin binary. Leave empty to auto-detect (~/.kin/bin/kin or PATH)."
         },
+        "kin.queryTimeoutMs": {
+          "type": "number",
+          "default": 30000,
+          "minimum": 1000,
+          "description": "How long an interactive Kin query may take before it is treated as a timeout, in milliseconds. A warm semantic query was measured at 11.7 s on one run and 24.0 s on another against the same repository on a loaded host, so the old fixed 15000 sat inside the observed range. Raise this on a large repository or a busy machine."
+        },
         "kin.mcpEnabled": {
           "type": "boolean",
           "default": true,

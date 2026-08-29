@@ -46,6 +46,12 @@ export function formatSearchResultDetail(entity: KinEntity): string {
 }
 
 export function formatStatusBarText(status: KinStatus): string {
+  // Warming is checked first. The daemon is reachable and the repository is
+  // fine; saying "not initialized" here is what sent a first-time user to
+  // `kin init` on a repository that was already indexed.
+  if (status.warming) {
+    return "$(sync~spin) Kin: starting up";
+  }
   // Drift is checked before reachability, because a drifted answer IS a
   // reachable runtime. Showing "unavailable" here would send the user to check
   // a binary that is running perfectly well.
@@ -61,6 +67,9 @@ export function formatStatusBarText(status: KinStatus): string {
 }
 
 export function formatStatusBarTooltip(status: KinStatus): string {
+  if (status.warming) {
+    return `Kin status. The graph is still starting, so no answer is available yet. ${status.warming}`;
+  }
   if (status.contractDrift) {
     return formatContractDriftMessage(status.contractDrift);
   }
@@ -93,6 +102,8 @@ export function formatOverviewMessage(overview: KinOverview): string {
   // Distinguish every non-happy graph state honestly instead of presenting
   // fabricated zeros as a real graph. Each state gets its own recovery hint.
   switch (overview.availability) {
+    case "warming":
+      return "the Kin graph is still starting, so nothing is indexed yet. This is startup latency, not an empty graph. It will answer once the daemon is ready.";
     case "contract-drift":
       return "the kin CLI answered in a shape this extension cannot read, so no graph state is shown. This is a version mismatch, not an empty graph. Update the Kin VS Code extension, or update the kin CLI, so the two agree.";
     case "not-indexed":

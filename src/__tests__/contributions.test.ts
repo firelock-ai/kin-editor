@@ -95,8 +95,12 @@ describe("package.json contributions are implemented", () => {
 
     const unread = settings.filter((key) => {
       const name = key.replace(/^kin\./, "");
-      return !source.includes(`get<string>("${name}")`) &&
-        !source.includes(`get<boolean>("${name}"`);
+      // Match any type parameter rather than a hardcoded list of two. The old
+      // form knew only get<string> and get<boolean>, so contributing a setting
+      // of any other type failed this guard even when the code read it.
+      return !new RegExp(
+        `get<[A-Za-z_$][\\w$]*>\\("${name}"`
+      ).test(source);
     });
     expect(unread).toEqual([]);
   });
