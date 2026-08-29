@@ -2,6 +2,12 @@
 
 All notable changes to the Kin VS Code extension are documented in this file.
 
+## [0.1.7] - 2026-08-29
+
+### Changed
+
+- Order the editor first-run around the graph, and price the embed step (#85)
+
 ## [0.1.6] - 2026-08-29
 
 ### Changed
