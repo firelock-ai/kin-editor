@@ -2,6 +2,23 @@
 
 All notable changes to the Kin VS Code extension are documented in this file.
 
+## [0.1.4] - 2026-08-29
+
+### Changed
+
+- Honour the daemon's still-starting retry signal instead of emptying the pane (#75)
+- Pin the CLI fallback contract to the shipped CLI and make drift visible (#74)
+- chore(deps-dev): bump @typescript-eslint/eslint-plugin from 8.65.0 to 8.67.0 (#64)
+- chore(deps): bump actions/checkout from 7.0.0 to 7.0.1 (#45)
+- Re-key the bug report version placeholders to the shipping versions (#62)
+- chore(deps-dev): bump @types/vscode from 1.85.0 to 1.125.0 (#46)
+- chore(deps-dev): bump eslint from 10.8.0 to 10.8.1 (#63)
+- chore(deps-dev): bump @typescript-eslint/parser from 8.65.0 to 8.67.0 (#65)
+- chore(deps-dev): bump ovsx from 1.0.2 to 1.1.1 (#66)
+- Replace marketplace displayName with the locked category noun (#67)
+- Surface merge-queue ejections on the pull request they hit (#68)
+- Make every declared contribution answer, and say when Kin is unreachable (#61)
+
 ## [0.1.3] - 2026-08-12
 
 ### Changed
