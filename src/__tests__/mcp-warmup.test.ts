@@ -68,8 +68,21 @@ const fixture = JSON.parse(
 const WARMING_TEXT = fixture.text;
 const NOT_WARMING_TEXT = fixture.not_warming.text;
 
-/** Retry fast so the suite does not spend real seconds proving a backoff. */
-const FAST_WARMUP = { totalBudgetMs: 60, firstBackoffMs: 1, maxBackoffMs: 4 };
+// One constant used to serve both kinds of test below, and only one of them
+// wanted a short budget. A test that must RETRY AND SUCCEED was racing a 60 ms
+// wall clock: the schedule it needs is about 3 ms of backoff, but the deadline
+// is real time, and under a full parallel suite the event loop stalls past it,
+// so the retry gave up and the arm failed on host load rather than on the code.
+// Measured on 2026-08-29: green alone in 1.1 s, four runs; failed twice inside
+// the full 21-suite run at the same commit. The product budget is 90_000 ms, so
+// nothing here is a claim about the shipped schedule.
+//
+// Split in two. A test that must succeed gets a budget it cannot lose to
+// scheduling, which costs nothing because it returns on the first non-warming
+// reply. A test that must GIVE UP keeps the short budget, because expiring is
+// the behavior it exists to prove.
+const PATIENT_WARMUP = { totalBudgetMs: 5_000, firstBackoffMs: 1, maxBackoffMs: 4 };
+const EXPIRING_WARMUP = { totalBudgetMs: 60, firstBackoffMs: 1, maxBackoffMs: 4 };
 
 function warmingMcp(replies: Array<"warm" | string>) {
   let call = 0;
@@ -127,7 +140,7 @@ describe("KinClient warmup retry", () => {
       { kind: "Function", name: "build_router", file: "router.py", line: 20 },
     ];
     const mcp = warmingMcp(["warm", "warm", JSON.stringify(entities)]);
-    const client = new KinClient("/workspace", mcp as never, FAST_WARMUP);
+    const client = new KinClient("/workspace", mcp as never, PATIENT_WARMUP);
 
     const results = await client.search("where is the router built");
 
@@ -139,7 +152,7 @@ describe("KinClient warmup retry", () => {
 
   it("shows the server's own warming sentence, once", async () => {
     const mcp = warmingMcp(["warm", "warm", "[]"]);
-    const client = new KinClient("/workspace", mcp as never, FAST_WARMUP);
+    const client = new KinClient("/workspace", mcp as never, PATIENT_WARMUP);
     await client.search("q");
 
     expect(mockShowWarningMessage).toHaveBeenCalledTimes(1);
@@ -152,7 +165,7 @@ describe("KinClient warmup retry", () => {
     // Before this, a persistently warming daemon produced `[]` with no error,
     // which is indistinguishable from a repository containing nothing.
     const mcp = warmingMcp(["warm"]);
-    const client = new KinClient("/workspace", mcp as never, FAST_WARMUP);
+    const client = new KinClient("/workspace", mcp as never, EXPIRING_WARMUP);
 
     await expect(client.search("q")).rejects.toThrow(McpToolError);
     expect(mockExecFile).not.toHaveBeenCalled();
@@ -175,7 +188,7 @@ describe("KinClient warmup retry", () => {
         cb(null, JSON.stringify([{ kind: "Function", name: "f", file: "a.py", line: 1 }]), "");
       }
     );
-    const client = new KinClient("/workspace", mcp as never, FAST_WARMUP);
+    const client = new KinClient("/workspace", mcp as never, PATIENT_WARMUP);
 
     const results = await client.search("q");
     expect(results).toHaveLength(1);
@@ -184,7 +197,7 @@ describe("KinClient warmup retry", () => {
 
   it("reports overview warming as its own state, not as unavailable or empty", async () => {
     const mcp = warmingMcp(["warm"]);
-    const client = new KinClient("/workspace", mcp as never, FAST_WARMUP);
+    const client = new KinClient("/workspace", mcp as never, EXPIRING_WARMUP);
 
     const overview = await client.overview();
     expect(overview.availability).toBe("warming");
@@ -196,7 +209,7 @@ describe("KinClient warmup retry", () => {
 
   it("reports status warming as reachable, carrying the server's text", async () => {
     const mcp = warmingMcp(["warm"]);
-    const client = new KinClient("/workspace", mcp as never, FAST_WARMUP);
+    const client = new KinClient("/workspace", mcp as never, EXPIRING_WARMUP);
 
     const status = await client.status();
     expect(status.reachable).toBe(true);
@@ -225,7 +238,7 @@ describe("query timeout budget", () => {
     // A warm semantic query was measured at 24.0s on a loaded host, which the
     // old fixed 15000 would have killed and dropped onto the CLI fallback.
     const mcp = warmingMcp(["[]"]);
-    const client = new KinClient("/workspace", mcp as never, FAST_WARMUP);
+    const client = new KinClient("/workspace", mcp as never, PATIENT_WARMUP);
     await client.search("q");
 
     expect(mcp.callTool).toHaveBeenCalledWith(
