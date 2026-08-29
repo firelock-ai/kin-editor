@@ -31,20 +31,27 @@ On macOS or Linux:
 ```sh
 curl -fsSL https://get.kinlab.dev/install | sh
 exec "$SHELL" -l
-kin setup --intent editor
 
 cd /path/to/your/repository
 kin init .
-kin embed
+kin setup --intent editor
 kin status
 ```
 
+`kin init` is the slow step and the one everything else rests on. It admits your
+Git history into the graph, and every panel in this extension reads that graph
+rather than the files on disk. Run it before `kin setup` so setup has a
+repository to check.
+
+Natural-language semantic search additionally needs vectors, which admission
+does not build. Add them with `kin embed`. The first run on a machine downloads
+about 523 MB of embedding model before anything is indexed, so it is worth
+starting deliberately rather than in the middle of the install. The entity
+explorer, trace, and name search all answer before that finishes, and
+`kin status` reports embedding coverage so you can see where it is.
+
 Use the [Kin quickstart](https://github.com/firelock-ai/kin/blob/main/docs/quickstart.md)
 for Homebrew, npm, Windows, installer options, and platform limitations.
-`kin status` should report an initialized graph and complete embedding coverage
-before the natural-language query path is considered ready. Embedding time
-scales with repository size; graph overview, entity browsing, and name search
-remain available without vectors.
 
 ### 2. Install the extension
 
