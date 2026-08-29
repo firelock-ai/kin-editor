@@ -81,6 +81,11 @@
         "title": "Kin: Refresh Entity Explorer",
         "category": "Kin",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "kin.openWalkthrough",
+        "title": "Kin: Start Here",
+        "category": "Kin"
       }
     ],
     "viewsContainers": {
@@ -100,6 +105,18 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "kinExplorer",
+        "contents": "Software that remembers itself.\n\nGit shows which lines changed. Kin shows what the change affects. This folder has no Kin graph yet.\n[Initialize Repository](command:kin.init)\n[Start here](command:kin.openWalkthrough)\nAlready ran kin init? Check what is wired with [Setup Workspace](command:kin.setupWorkspace).",
+        "when": "workspaceFolderCount > 0 && !kin.initialized"
+      },
+      {
+        "view": "kinExplorer",
+        "contents": "Kin needs an open folder.\n\nOpen the repository you want to work in, then come back here.\n[Open Folder](command:vscode.openFolder)\n[Start here](command:kin.openWalkthrough)",
+        "when": "workspaceFolderCount == 0"
+      }
+    ],
     "menus": {
       "view/title": [
         {
@@ -184,7 +201,62 @@
           "description": "Use a persistent MCP connection to the Kin graph for zero-overhead queries. Disable to fall back to one CLI subprocess per command. Hover and go-to-definition run only over MCP and return nothing while it is off."
         }
       }
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "kinFirstRun",
+        "title": "Software that remembers itself.",
+        "description": "Git shows which lines changed. Kin shows what the change affects.",
+        "steps": [
+          {
+            "id": "kin.step.whatKinIs",
+            "title": "What Kin is",
+            "description": "Kin keeps a living map of the software itself so humans and agents can understand what every change touches. It runs beside Git and it never writes to your `.git`.",
+            "media": {
+              "markdown": "resources/walkthrough/what-kin-is.md"
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          },
+          {
+            "id": "kin.step.initialize",
+            "title": "Build the graph for this repository",
+            "description": "`kin init` reads the folder you have open and writes the graph to `.kin/`. The CLI's own output streams into the Kin output channel while it runs.\n[Initialize Repository](command:kin.init)",
+            "media": {
+              "markdown": "resources/walkthrough/initialize.md"
+            },
+            "completionEvents": [
+              "onContext:kin.initialized",
+              "onCommand:kin.init"
+            ]
+          },
+          {
+            "id": "kin.step.checkInstall",
+            "title": "Check what is actually wired",
+            "description": "The setup panel runs `kin setup status` and shows every row it reports, with the fix each row carries. The banner is the CLI's own verdict.\n[Open Setup Workspace](command:kin.setupWorkspace)",
+            "media": {
+              "markdown": "resources/walkthrough/check-install.md"
+            },
+            "completionEvents": [
+              "onCommand:kin.setupWorkspace"
+            ]
+          },
+          {
+            "id": "kin.step.findYourWay",
+            "title": "Find your way around",
+            "description": "The Kin icon in the activity bar opens the Entity Explorer, listed from the graph rather than from a file tree. Search, trace, review and overview all answer from the same graph.\n[Ask the graph a question](command:kin.search)",
+            "media": {
+              "markdown": "resources/walkthrough/find-your-way.md"
+            },
+            "completionEvents": [
+              "onView:kinExplorer",
+              "onCommand:kin.search"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

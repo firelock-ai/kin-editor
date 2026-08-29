@@ -104,7 +104,12 @@ describe("parseHealthReport", () => {
     );
   });
 
-  it("never fabricates a passing check — unknown status falls back to missing", () => {
+  it("never fabricates a passing check: an unknown status is not healthy", () => {
+    // It used to fall back to `missing`, which is a claim rather than a
+    // fallback: it renders as a red cross and drives the whole report to
+    // failing. That is how `pending` and `degraded` were reported as faults
+    // for a release. An unrecognized status is now `unknown`, which is not
+    // healthy, not in scope for a ready verdict, and not an accusation.
     const raw = JSON.stringify({
       platform: "linux",
       checks: [
@@ -113,7 +118,9 @@ describe("parseHealthReport", () => {
       healthy: true,
     });
     const report = parseHealthReport(raw);
-    expect(report.checks[0].status).toBe("missing");
+    expect(report.checks[0].status).toBe("unknown");
+    expect(report.checks[0].rawStatus).toBe("bananas");
+    expect(isFailing(report.checks[0].status)).toBe(false);
   });
 
   it("throws ParseError on non-JSON output", () => {
@@ -163,6 +170,8 @@ describe("hasFixableChecks", () => {
     const report: HealthReport = {
       platform: "macos",
       healthy: true,
+      verdict: "ready",
+      verdictSource: { kind: "report" },
       checks: [
         {
           id: "a",

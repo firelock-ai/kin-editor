@@ -6,8 +6,8 @@ import {
   HealthCheck,
   HealthReport,
   HealthStatusValue,
+  composeReadiness,
   hasFixableChecks,
-  isFailing,
   resolveKinBinary,
   runSetupStatus,
 } from "./setup-health";
@@ -24,7 +24,16 @@ const STATUS_GLYPH: Record<HealthStatusValue, string> = {
   missing: "✗",
   misconfigured: "✗",
   stale: "!",
+  // Work still in flight, not a fault. It reads as motion rather than as a
+  // cross, because both of these normalized to `missing` before and a fresh
+  // install's model download rendered as a red Missing row.
+  pending: "…",
+  degraded: "!",
   unsupported: "→",
+  // A status word this extension does not know. It is not a cross, because
+  // "we cannot read this" and "this is broken" are different claims and only
+  // one of them is true here.
+  unknown: "?",
 };
 
 const STATUS_LABEL: Record<HealthStatusValue, string> = {
@@ -32,7 +41,10 @@ const STATUS_LABEL: Record<HealthStatusValue, string> = {
   missing: "Missing",
   misconfigured: "Misconfigured",
   stale: "Stale",
+  pending: "Working",
+  degraded: "Degraded",
   unsupported: "Not supported",
+  unknown: "Unrecognized",
 };
 
 let activePanel: vscode.WebviewPanel | undefined;
@@ -88,7 +100,7 @@ async function refresh(
   try {
     const report = await runSetupStatus(cwd);
     log(
-      `Setup Workspace: health report — ${report.checks.length} checks, healthy=${report.healthy}`
+      `Setup Workspace: health report: ${report.checks.length} checks, verdict=${report.verdict} (source ${report.verdictSource.kind})`
     );
     panel.webview.html = reportHtml(panel.webview, report);
   } catch (err) {
@@ -218,13 +230,18 @@ h1 { font-size: 1.4em; margin: 0 0 4px; }
 .banner { padding: 10px 12px; border-radius: 4px; margin-bottom: 16px; }
 .banner.ok { background: var(--vscode-inputValidation-infoBackground, rgba(100,180,100,0.12)); border: 1px solid var(--vscode-charts-green, #4caf50); }
 .banner.warn { background: var(--vscode-inputValidation-warningBackground, rgba(200,160,40,0.12)); border: 1px solid var(--vscode-charts-yellow, #d8a000); }
+.banner.bad { background: var(--vscode-inputValidation-errorBackground, rgba(220,80,80,0.12)); border: 1px solid var(--vscode-charts-red, #f14c4c); }
+.banner .advice { margin-top: 6px; }
+.banner .note { margin: 6px 0 0; color: var(--vscode-descriptionForeground); font-style: italic; }
 .check { border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.3)); border-radius: 4px; padding: 10px 12px; margin-bottom: 10px; }
 .check-head { display: flex; align-items: baseline; gap: 8px; }
 .glyph { font-weight: bold; width: 1.2em; text-align: center; }
 .glyph.healthy { color: var(--vscode-charts-green, #4caf50); }
 .glyph.missing, .glyph.misconfigured { color: var(--vscode-charts-red, #f14c4c); }
-.glyph.stale { color: var(--vscode-charts-yellow, #d8a000); }
+.glyph.stale, .glyph.degraded { color: var(--vscode-charts-yellow, #d8a000); }
+.glyph.pending { color: var(--vscode-charts-blue, #3794ff); }
 .glyph.unsupported { color: var(--vscode-charts-blue, #3794ff); }
+.glyph.unknown { color: var(--vscode-descriptionForeground); }
 .check-label { font-weight: 600; }
 .check-status { color: var(--vscode-descriptionForeground); font-size: 0.85em; margin-left: auto; }
 .detail { margin: 4px 0 0 1.6em; color: var(--vscode-foreground); }
@@ -253,6 +270,13 @@ function statusLine(check: HealthCheck): string {
   ];
   if (check.detail) {
     parts.push(`<div class="detail">${escapeHtml(check.detail)}</div>`);
+  }
+  if (check.status === "unknown") {
+    // Say the word the CLI wrote. Rendering "Unrecognized" without it tells
+    // the user less than the CLI said, and leaves them nothing to report.
+    parts.push(
+      `<div class="note">This kin CLI reported the status "${escapeHtml(check.rawStatus ?? "")}", which this extension does not recognize. Update the Kin extension.</div>`
+    );
   }
   if (check.platform_note) {
     parts.push(`<div class="note">Platform note: ${escapeHtml(check.platform_note)}</div>`);
@@ -299,38 +323,73 @@ function looksRunnable(manualFix: string): boolean {
   return /^(kin|cargo|rm|npm|npx|git)\b/.test(trimmed);
 }
 
-function reportHtml(webview: vscode.Webview, report: HealthReport): string {
-  const scriptNonce = nonce();
-  const failing = report.checks.filter((c) => isFailing(c.status)).length;
-  const banner = report.healthy
-    ? `<div class="banner ok">Kin is ready in this workspace. You can run a semantic search now.</div>`
-    : `<div class="banner warn">${failing} check${failing === 1 ? "" : "s"} need attention before Kin is fully wired in this workspace.</div>`;
+/**
+ * Render the readiness banner from the report's verdict.
+ *
+ * Keyed on {@link composeReadiness} rather than on `report.healthy`, because
+ * that boolean collapses "still warming up" and "broken" into one false, and a
+ * banner reading it renders a fresh install's model download as a failure.
+ */
+export function bannerHtml(report: HealthReport): string {
+  const line = composeReadiness(report);
+  const parts = [
+    `<div class="banner ${line.tone}">`,
+    `<div>${escapeHtml(line.headline)}</div>`,
+    `<div class="advice">${escapeHtml(line.advice)}</div>`,
+  ];
+  if (line.disagreementNote) {
+    parts.push(`<p class="note">${escapeHtml(line.disagreementNote)}</p>`);
+  }
+  if (line.sourceNote) {
+    parts.push(`<p class="note">${escapeHtml(line.sourceNote)}</p>`);
+  }
+  parts.push(`</div>`);
+  return parts.join("");
+}
 
-  const toolbarButtons: string[] = [];
-  toolbarButtons.push(
-    `<button data-command="refresh">Re-check</button>`
-  );
+/** Every toolbar action the panel can offer, keyed by its data-command name. */
+const TOOLBAR_BUTTONS: Record<string, string> = {
+  refresh: `<button data-command="refresh">Re-check</button>`,
+  doctorFix: `<button data-command="doctorFix">Run kin doctor --fix</button>`,
+  init: `<button class="secondary" data-command="init">Initialize Repository</button>`,
+  search: `<button class="secondary" data-command="search">Try a semantic search</button>`,
+};
+
+/**
+ * Which toolbar actions this report earns.
+ *
+ * Split out from the HTML so the decision can be asserted as a decision rather
+ * than as a substring of a page. The search action is offered on anything that
+ * is not failing, which is exactly the set the old `report.healthy` gate
+ * offered it to. Narrowing it to `ready` would have hidden a working search
+ * from every warming install, which is a regression this change would have
+ * shipped in the name of fixing the banner.
+ */
+export function toolbarCommands(report: HealthReport): string[] {
+  const commands = ["refresh"];
   if (hasFixableChecks(report)) {
-    toolbarButtons.push(
-      `<button data-command="doctorFix">Run kin doctor --fix</button>`
-    );
+    commands.push("doctorFix");
   }
   if (report.checks.some((c) => c.id === "repo_init" && c.status !== "healthy")) {
-    toolbarButtons.push(
-      `<button class="secondary" data-command="init">Initialize Repository</button>`
-    );
+    commands.push("init");
   }
-  if (report.healthy) {
-    toolbarButtons.push(
-      `<button class="secondary" data-command="search">Try a semantic search</button>`
-    );
+  if (report.verdict !== "failing") {
+    commands.push("search");
   }
+  return commands;
+}
+
+function reportHtml(webview: vscode.Webview, report: HealthReport): string {
+  const scriptNonce = nonce();
+  const banner = bannerHtml(report);
+
+  const toolbarButtons = toolbarCommands(report).map((id) => TOOLBAR_BUTTONS[id]);
 
   const checks = report.checks.map(statusLine).join("");
 
   const body = `
 <h1>Set up Kin in this workspace</h1>
-<p class="subtitle">Platform: ${escapeHtml(report.platform)} — every status below comes from <code>kin setup status</code>.</p>
+<p class="subtitle">Platform: ${escapeHtml(report.platform)}. Every status below comes from <code>kin setup status</code>.</p>
 ${banner}
 <div class="toolbar">${toolbarButtons.join("")}</div>
 ${checks}

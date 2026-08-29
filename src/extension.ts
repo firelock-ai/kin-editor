@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
-import { KinClient } from "./kin-client";
 import { EntityExplorerProvider } from "./entity-explorer";
 import { KinStatusBar } from "./status-bar";
 import { KinHoverProvider } from "./providers/hover-provider";
@@ -12,7 +11,20 @@ import { KinReviewProvider } from "./providers/review-provider";
 import { KinRenameProvider } from "./providers/rename-provider";
 import { showSearchQuickPick, showTraceQuickPick } from "./search-panel";
 import { showSetupWorkspace } from "./setup-panel";
-import { initLogger, log } from "./logger";
+import { resolveKinBinary } from "./setup-health";
+import {
+  CONTEXT_INITIALIZED,
+  FIRST_RUN_ACTION,
+  FIRST_RUN_DISMISS,
+  FIRST_RUN_OFFER,
+  FIRST_RUN_OFFERED_KEY,
+  InitOutcome,
+  runKinInit,
+  shouldOfferFirstRun,
+  summarizeInit,
+  walkthroughTarget,
+} from "./first-run";
+import { initLogger, log, showLog } from "./logger";
 import { WorkspaceManager } from "./workspace-manager";
 import {
   describeError,
@@ -33,18 +45,39 @@ const CONTRIBUTED_COMMANDS = [
   "kin.status",
   "kin.review",
   "kin.refresh",
+  "kin.openWalkthrough",
 ] as const;
+
+/**
+ * The install command the walkthrough and the no-binary error both offer.
+ *
+ * One constant rather than two copies, because a stale install line in a
+ * first-run surface is worse than none: it is the first thing a stranger
+ * types.
+ */
+const INSTALL_COMMAND = "curl -fsSL https://get.kinlab.dev/install | sh";
 
 export function activate(context: vscode.ExtensionContext): void {
   const folders = vscode.workspace.workspaceFolders;
+
+  // Registered before every branch below, because it is the one command that
+  // answers when there is nothing yet to answer about. A window with no folder
+  // and a folder with no graph both reach the walkthrough from here.
+  context.subscriptions.push(
+    vscode.commands.registerCommand("kin.openWalkthrough", () =>
+      openWalkthrough(context)
+    )
+  );
+
   if (!folders || folders.length === 0) {
+    void setInitialized(false);
     // The palette lists every contributed command from the manifest as soon as
     // the extension activates, and activation is onStartupFinished. With no
     // folder open there is nothing to bind them to, so bind them to an answer
     // rather than letting the palette report "command not found".
     context.subscriptions.push(
-      ...CONTRIBUTED_COMMANDS.map((id) =>
-        vscode.commands.registerCommand(id, () => explainNoFolder())
+      ...CONTRIBUTED_COMMANDS.filter((id) => id !== "kin.openWalkthrough").map(
+        (id) => vscode.commands.registerCommand(id, () => explainNoFolder())
       )
     );
     return;
@@ -84,45 +117,43 @@ export function activate(context: vscode.ExtensionContext): void {
   // kin.init runs the real initialization, and the query commands guide the
   // user into setup instead of failing. kin.setupWorkspace is registered above
   // and works here too.
+  void setInitialized(manager.size > 0);
+
   if (manager.size === 0) {
-    const initInThisWorkspace = async () => {
-      const resolved =
-        folders.length === 1
-          ? folders[0]
-          : await vscode.window.showWorkspaceFolderPick({
-              placeHolder: "Select folder to initialize Kin in",
-            });
-      if (!resolved) return;
-      const client = new KinClient(resolved.uri.fsPath);
-      try {
-        await client.init();
-        vscode.window.showInformationMessage(
-          "Kin repository initialized. Reload this window to activate the explorer and commands."
-        );
-      } catch (err) {
-        vscode.window.showErrorMessage(`Kin init failed: ${describeError(err)}`);
-      }
-    };
+    // The Entity Explorer has no client to list entities from here, so it is
+    // registered with a provider that returns nothing. That makes the view
+    // empty on purpose rather than by omission, which is what the manifest's
+    // viewsWelcome block renders into: the coldwalk found an empty panel with
+    // no explanation and no next step, and this is the panel it found.
+    context.subscriptions.push(
+      vscode.window.registerTreeDataProvider("kinExplorer", EMPTY_EXPLORER)
+    );
 
     const guideToSetup = async () => {
       const choice = await vscode.window.showInformationMessage(
-        "Kin isn't initialized in this folder yet. Set it up to enable search, trace, and review.",
-        "Set up Kin",
-        "Initialize Repository"
+        "This folder has no Kin graph yet. Build one to enable search, trace and review.",
+        "Start here",
+        "Build the graph"
       );
-      if (choice === "Set up Kin") {
-        await vscode.commands.executeCommand("kin.setupWorkspace");
-      } else if (choice === "Initialize Repository") {
+      if (choice === "Start here") {
+        await vscode.commands.executeCommand("kin.openWalkthrough");
+      } else if (choice === "Build the graph") {
         await vscode.commands.executeCommand("kin.init");
       }
     };
 
     context.subscriptions.push(
-      vscode.commands.registerCommand("kin.init", initInThisWorkspace),
+      vscode.commands.registerCommand("kin.init", () => initGraph(folders)),
       ...["kin.search", "kin.overview", "kin.trace", "kin.status", "kin.review", "kin.refresh"].map(
         (id) => vscode.commands.registerCommand(id, guideToSetup)
       )
     );
+
+    void offerFirstRun(context, {
+      hasWorkspaceFolder: true,
+      kinFolderCount: manager.size,
+      alreadyOffered: context.globalState.get<boolean>(FIRST_RUN_OFFERED_KEY, false),
+    });
     return;
   }
 
@@ -255,22 +286,10 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand("kin.init", async () => {
-      const resolved = folders.length === 1
-        ? folders[0]
-        : await vscode.window.showWorkspaceFolderPick({
-            placeHolder: "Select folder to initialize Kin in",
-          });
-      if (!resolved) return;
-      const client = new KinClient(resolved.uri.fsPath);
-      try {
-        await client.init();
-        vscode.window.showInformationMessage(
-          "Kin repository initialized. Reload this window to activate the explorer and commands."
-        );
+      const built = await initGraph(folders);
+      if (built) {
         explorerProvider.refresh();
         statusBar?.update();
-      } catch (err) {
-        vscode.window.showErrorMessage(`Kin init failed: ${describeError(err)}`);
       }
     }),
 
@@ -318,6 +337,157 @@ export function activate(context: vscode.ExtensionContext): void {
       statusBar?.update();
     })
   );
+}
+
+/**
+ * A tree provider with nothing in it, for the view a workspace with no graph
+ * shows. It exists so the view is empty by declaration, and so the welcome
+ * content contributed for that case has a registered view to render into.
+ */
+const EMPTY_EXPLORER: vscode.TreeDataProvider<never> = {
+  getChildren: () => [],
+  getTreeItem: (element: never) => element,
+};
+
+/**
+ * Publish whether this workspace has a Kin graph, for the `when` clauses in
+ * contributes.viewsWelcome.
+ *
+ * The key is only ever set from what the workspace manager found, never from
+ * an assumption, so the welcome block cannot claim a state the extension did
+ * not observe.
+ */
+async function setInitialized(value: boolean): Promise<void> {
+  await vscode.commands.executeCommand("setContext", CONTEXT_INITIALIZED, value);
+}
+
+/** Open the first-run walkthrough, addressed through the live extension id. */
+async function openWalkthrough(
+  context: vscode.ExtensionContext
+): Promise<void> {
+  await vscode.commands.executeCommand(
+    "workbench.action.openWalkthrough",
+    walkthroughTarget(context.extension.id),
+    false
+  );
+}
+
+/**
+ * Make the one-time first-run offer, once the decision says to.
+ *
+ * The flag is written before the notification is shown rather than after the
+ * user answers it, because an unanswered notification is dismissed silently
+ * and a flag written on the answer would re-offer forever.
+ */
+async function offerFirstRun(
+  context: vscode.ExtensionContext,
+  state: Parameters<typeof shouldOfferFirstRun>[0]
+): Promise<void> {
+  if (!shouldOfferFirstRun(state)) {
+    return;
+  }
+  await context.globalState.update(FIRST_RUN_OFFERED_KEY, true);
+  const choice = await vscode.window.showInformationMessage(
+    FIRST_RUN_OFFER,
+    FIRST_RUN_ACTION,
+    FIRST_RUN_DISMISS
+  );
+  if (choice === FIRST_RUN_ACTION) {
+    await vscode.commands.executeCommand("kin.openWalkthrough");
+  }
+}
+
+/**
+ * Run `kin init` in a chosen folder and report what the CLI said.
+ *
+ * The one place the extension builds a graph, so the streaming, the refusal
+ * text and the missing-binary case are written once. Everything the user reads
+ * on the failing path is the CLI's own last line, quoted; this function has no
+ * opinion about why an init refused and does not invent one.
+ *
+ * Returns true only when the CLI exited zero.
+ */
+async function initGraph(
+  folders: readonly vscode.WorkspaceFolder[]
+): Promise<boolean> {
+  const resolved =
+    folders.length === 1
+      ? folders[0]
+      : await vscode.window.showWorkspaceFolderPick({
+          placeHolder: "Select the folder to build the Kin graph in",
+        });
+  if (!resolved) return false;
+
+  const binary = resolveKinBinary();
+  let outcome: InitOutcome;
+  try {
+    outcome = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Kin: building the graph",
+        cancellable: false,
+      },
+      (progress) =>
+        runKinInit(binary, resolved.uri.fsPath, (line) => {
+          log(`kin init [${line.stream}] ${line.text}`);
+          const trimmed = line.text.trim();
+          if (trimmed.length > 0) {
+            progress.report({ message: trimmed });
+          }
+        })
+    );
+  } catch (err) {
+    await reportInitCouldNotStart(binary, err);
+    return false;
+  }
+
+  const summary = summarizeInit(outcome);
+  if (summary.tone === "error") {
+    const choice = await vscode.window.showErrorMessage(
+      summary.message,
+      "Show output"
+    );
+    if (choice === "Show output") {
+      showLog();
+    }
+    return false;
+  }
+
+  await setInitialized(true);
+  const choice = await vscode.window.showInformationMessage(
+    `${summary.message} Reload the window to activate the explorer and the query commands.`,
+    "Reload Window",
+    "Show output"
+  );
+  if (choice === "Reload Window") {
+    await vscode.commands.executeCommand("workbench.action.reloadWindow");
+  } else if (choice === "Show output") {
+    showLog();
+  }
+  return true;
+}
+
+/** The `kin init` process never started. Say which case this is. */
+async function reportInitCouldNotStart(
+  binary: string,
+  err: unknown
+): Promise<void> {
+  if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
+    vscode.window.showErrorMessage(
+      `Kin init could not start: ${describeError(err)}`
+    );
+    return;
+  }
+  const choice = await vscode.window.showErrorMessage(
+    `No kin binary was found at "${binary}". Install Kin, or set kin.binaryPath in settings.`,
+    "Copy install command"
+  );
+  if (choice === "Copy install command") {
+    await vscode.env.clipboard.writeText(INSTALL_COMMAND);
+    vscode.window.showInformationMessage(
+      `Copied: ${INSTALL_COMMAND}`
+    );
+  }
 }
 
 /**
