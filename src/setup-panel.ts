@@ -347,33 +347,43 @@ export function bannerHtml(report: HealthReport): string {
   return parts.join("");
 }
 
+/** Every toolbar action the panel can offer, keyed by its data-command name. */
+const TOOLBAR_BUTTONS: Record<string, string> = {
+  refresh: `<button data-command="refresh">Re-check</button>`,
+  doctorFix: `<button data-command="doctorFix">Run kin doctor --fix</button>`,
+  init: `<button class="secondary" data-command="init">Initialize Repository</button>`,
+  search: `<button class="secondary" data-command="search">Try a semantic search</button>`,
+};
+
+/**
+ * Which toolbar actions this report earns.
+ *
+ * Split out from the HTML so the decision can be asserted as a decision rather
+ * than as a substring of a page. The search action is offered on anything that
+ * is not failing, which is exactly the set the old `report.healthy` gate
+ * offered it to. Narrowing it to `ready` would have hidden a working search
+ * from every warming install, which is a regression this change would have
+ * shipped in the name of fixing the banner.
+ */
+export function toolbarCommands(report: HealthReport): string[] {
+  const commands = ["refresh"];
+  if (hasFixableChecks(report)) {
+    commands.push("doctorFix");
+  }
+  if (report.checks.some((c) => c.id === "repo_init" && c.status !== "healthy")) {
+    commands.push("init");
+  }
+  if (report.verdict !== "failing") {
+    commands.push("search");
+  }
+  return commands;
+}
+
 function reportHtml(webview: vscode.Webview, report: HealthReport): string {
   const scriptNonce = nonce();
   const banner = bannerHtml(report);
 
-  const toolbarButtons: string[] = [];
-  toolbarButtons.push(
-    `<button data-command="refresh">Re-check</button>`
-  );
-  if (hasFixableChecks(report)) {
-    toolbarButtons.push(
-      `<button data-command="doctorFix">Run kin doctor --fix</button>`
-    );
-  }
-  if (report.checks.some((c) => c.id === "repo_init" && c.status !== "healthy")) {
-    toolbarButtons.push(
-      `<button class="secondary" data-command="init">Initialize Repository</button>`
-    );
-  }
-  // Offered on anything that is not failing, which is exactly the set the old
-  // `report.healthy` gate offered it to. Narrowing it to `ready` would have
-  // hidden a working search from every warming install, which is a regression
-  // this change would have shipped in the name of fixing the banner.
-  if (report.verdict !== "failing") {
-    toolbarButtons.push(
-      `<button class="secondary" data-command="search">Try a semantic search</button>`
-    );
-  }
+  const toolbarButtons = toolbarCommands(report).map((id) => TOOLBAR_BUTTONS[id]);
 
   const checks = report.checks.map(statusLine).join("");
 

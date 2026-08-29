@@ -108,7 +108,7 @@
     "viewsWelcome": [
       {
         "view": "kinExplorer",
-        "contents": "Software that remembers itself.\n\nGit shows which lines changed. Kin shows what the change affects. This folder has no Kin graph yet.\n[Build the graph here](command:kin.init)\n[Start here](command:kin.openWalkthrough)\nAlready ran kin init? Check what is wired with [Setup Workspace](command:kin.setupWorkspace).",
+        "contents": "Software that remembers itself.\n\nGit shows which lines changed. Kin shows what the change affects. This folder has no Kin graph yet.\n[Initialize Repository](command:kin.init)\n[Start here](command:kin.openWalkthrough)\nAlready ran kin init? Check what is wired with [Setup Workspace](command:kin.setupWorkspace).",
         "when": "workspaceFolderCount > 0 && !kin.initialized"
       },
       {
@@ -222,7 +222,7 @@
           {
             "id": "kin.step.initialize",
             "title": "Build the graph for this repository",
-            "description": "`kin init` reads the folder you have open and writes the graph to `.kin/`. The CLI's own output streams into the Kin output channel while it runs.\n[Build the graph here](command:kin.init)",
+            "description": "`kin init` reads the folder you have open and writes the graph to `.kin/`. The CLI's own output streams into the Kin output channel while it runs.\n[Initialize Repository](command:kin.init)",
             "media": {
               "markdown": "resources/walkthrough/initialize.md"
             },
