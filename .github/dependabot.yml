@@ -5,6 +5,18 @@ updates:
     schedule:
       interval: "weekly"
     target-branch: "main"
+    ignore:
+      # @types/vscode tracks the VS Code minor it describes, and vsce refuses to
+      # package when it is newer than engines.vscode. A minor bump here without a
+      # matching engines change therefore breaks the release rather than the PR
+      # that made it. Raising the supported floor is a deliberate decision about
+      # which users keep working, so it is made by hand alongside engines.vscode,
+      # not by an automated bump. Patch updates inside the current minor stay
+      # allowed because they cannot cross the floor.
+      - dependency-name: "@types/vscode"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
 
   - package-ecosystem: "github-actions"
     directory: "/"
