@@ -30,6 +30,10 @@ const STATUS_GLYPH: Record<HealthStatusValue, string> = {
   pending: "…",
   degraded: "!",
   unsupported: "→",
+  // A status word this extension does not know. It is not a cross, because
+  // "we cannot read this" and "this is broken" are different claims and only
+  // one of them is true here.
+  unknown: "?",
 };
 
 const STATUS_LABEL: Record<HealthStatusValue, string> = {
@@ -40,6 +44,7 @@ const STATUS_LABEL: Record<HealthStatusValue, string> = {
   pending: "Working",
   degraded: "Degraded",
   unsupported: "Not supported",
+  unknown: "Unrecognized",
 };
 
 let activePanel: vscode.WebviewPanel | undefined;
@@ -95,7 +100,7 @@ async function refresh(
   try {
     const report = await runSetupStatus(cwd);
     log(
-      `Setup Workspace: health report — ${report.checks.length} checks, verdict=${report.verdict} (${report.verdictSource})`
+      `Setup Workspace: health report: ${report.checks.length} checks, verdict=${report.verdict} (source ${report.verdictSource.kind})`
     );
     panel.webview.html = reportHtml(panel.webview, report);
   } catch (err) {
@@ -236,6 +241,7 @@ h1 { font-size: 1.4em; margin: 0 0 4px; }
 .glyph.stale, .glyph.degraded { color: var(--vscode-charts-yellow, #d8a000); }
 .glyph.pending { color: var(--vscode-charts-blue, #3794ff); }
 .glyph.unsupported { color: var(--vscode-charts-blue, #3794ff); }
+.glyph.unknown { color: var(--vscode-descriptionForeground); }
 .check-label { font-weight: 600; }
 .check-status { color: var(--vscode-descriptionForeground); font-size: 0.85em; margin-left: auto; }
 .detail { margin: 4px 0 0 1.6em; color: var(--vscode-foreground); }
@@ -264,6 +270,13 @@ function statusLine(check: HealthCheck): string {
   ];
   if (check.detail) {
     parts.push(`<div class="detail">${escapeHtml(check.detail)}</div>`);
+  }
+  if (check.status === "unknown") {
+    // Say the word the CLI wrote. Rendering "Unrecognized" without it tells
+    // the user less than the CLI said, and leaves them nothing to report.
+    parts.push(
+      `<div class="note">This kin CLI reported the status "${escapeHtml(check.rawStatus ?? "")}", which this extension does not recognize. Update the Kin extension.</div>`
+    );
   }
   if (check.platform_note) {
     parts.push(`<div class="note">Platform note: ${escapeHtml(check.platform_note)}</div>`);
@@ -352,7 +365,11 @@ function reportHtml(webview: vscode.Webview, report: HealthReport): string {
       `<button class="secondary" data-command="init">Initialize Repository</button>`
     );
   }
-  if (report.verdict === "ready") {
+  // Offered on anything that is not failing, which is exactly the set the old
+  // `report.healthy` gate offered it to. Narrowing it to `ready` would have
+  // hidden a working search from every warming install, which is a regression
+  // this change would have shipped in the name of fixing the banner.
+  if (report.verdict !== "failing") {
     toolbarButtons.push(
       `<button class="secondary" data-command="search">Try a semantic search</button>`
     );
@@ -362,7 +379,7 @@ function reportHtml(webview: vscode.Webview, report: HealthReport): string {
 
   const body = `
 <h1>Set up Kin in this workspace</h1>
-<p class="subtitle">Platform: ${escapeHtml(report.platform)} — every status below comes from <code>kin setup status</code>.</p>
+<p class="subtitle">Platform: ${escapeHtml(report.platform)}. Every status below comes from <code>kin setup status</code>.</p>
 ${banner}
 <div class="toolbar">${toolbarButtons.join("")}</div>
 ${checks}
