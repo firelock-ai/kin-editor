@@ -2,6 +2,12 @@
 
 All notable changes to the Kin VS Code extension are documented in this file.
 
+## [0.1.6] - 2026-08-29
+
+### Changed
+
+- Give the extension a first run, and key the ready banner on the health verdict (#83)
+
 ## [0.1.5] - 2026-08-29
 
 ### Changed
