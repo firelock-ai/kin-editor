@@ -74,8 +74,8 @@ function releaseHeldFrame(id) {
     id,
     result: toolText("fragment released"),
   });
-  // One write intentionally finishes the held response and carries the next
-  // complete frame. This proves the reader can drain coalesced frames too.
+  // One fixture write finishes the held response and carries the next complete
+  // frame. The synchronous reader test separately proves one coalesced chunk.
   process.stdout.write(Buffer.concat([remainder, releaseResponse]));
 }
 

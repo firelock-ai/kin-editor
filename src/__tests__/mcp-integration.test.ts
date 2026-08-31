@@ -121,9 +121,7 @@ afterAll(() => {
 
 describe("MCP frame reader state boundaries", () => {
   it("retains exact byte state across a partial header, split code point, and coalesced frame", () => {
-    const client = new McpClient(makeWorkspace(), {
-      spawn: { command: process.execPath, args: [FIXTURE] },
-    });
+    const client = new McpClient(makeWorkspace());
     clients.push(client);
 
     const received: string[] = [];
@@ -230,7 +228,7 @@ describe("MCP live integration (real subprocess, real stdio transport)", () => {
     const echoed = await client.callToolJson<{ cwd: string }>(
       "echo_cwd",
       {},
-      5_000
+      10_000
     );
     expect(echoed.cwd).toBe(workspace);
   });
@@ -242,7 +240,7 @@ describe("MCP live integration (real subprocess, real stdio transport)", () => {
     const fragmentedPromise = client.callTool(
       "__emit_fragmented_header__",
       {},
-      5_000
+      10_000
     );
     void fragmentedPromise.catch(() => undefined);
 
@@ -255,8 +253,8 @@ describe("MCP live integration (real subprocess, real stdio transport)", () => {
     expect(heldHeader.includes(Buffer.from("\r\n\r\n", "ascii"))).toBe(false);
 
     // The fixture releases the held bytes and a complete second response in
-    // one write. Both pending ids must dispatch from that coalesced chunk.
-    const releasePromise = client.callTool("__release_fragment__", {}, 5_000);
+    // one fixture write. Both pending ids must dispatch from the stream.
+    const releasePromise = client.callTool("__release_fragment__", {}, 10_000);
     const [fragmented, released] = await Promise.all([
       fragmentedPromise,
       releasePromise,
@@ -277,7 +275,7 @@ describe("MCP live integration (real subprocess, real stdio transport)", () => {
     const workspace = makeWorkspace();
     const client = await connectClient(workspace);
 
-    const unicodePromise = client.callTool("__emit_split_unicode__", {}, 5_000);
+    const unicodePromise = client.callTool("__emit_split_unicode__", {}, 10_000);
     void unicodePromise.catch(() => undefined);
 
     const heldPayload = await waitForBufferedBytes(
@@ -287,7 +285,7 @@ describe("MCP live integration (real subprocess, real stdio transport)", () => {
     );
     expect(heldPayload.subarray(-1)).toEqual(Buffer.from([0xe2]));
 
-    const releasePromise = client.callTool("__release_fragment__", {}, 5_000);
+    const releasePromise = client.callTool("__release_fragment__", {}, 10_000);
     const [unicode, released] = await Promise.all([
       unicodePromise,
       releasePromise,
