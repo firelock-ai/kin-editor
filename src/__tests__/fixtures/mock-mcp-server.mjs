@@ -17,25 +17,66 @@
 // bytes too. Repeating the editor's old string-buffer bug here would let the
 // test transport agree with itself while disagreeing with the MCP protocol.
 let buffer = Buffer.alloc(0);
+let heldFrameRemainder = null;
+
+function frame(msg) {
+  const payload = Buffer.from(JSON.stringify(msg), "utf-8");
+  const header = Buffer.from(`Content-Length: ${payload.length}\r\n\r\n`, "ascii");
+  return Buffer.concat([header, payload]);
+}
 
 function send(msg) {
-  const payload = JSON.stringify(msg);
-  process.stdout.write(
-    `Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`
-  );
+  process.stdout.write(frame(msg));
 }
 
 function sendResult(id, result) {
   send({ jsonrpc: "2.0", id, result });
 }
 
-function sendFragmentedResult(id, result) {
-  const payload = JSON.stringify({ jsonrpc: "2.0", id, result });
-  const header = `Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n`;
-  // Stop after the first CRLF. A stateful reader must retain this partial
-  // header until the second CRLF and payload arrive in the next chunk.
-  process.stdout.write(header.slice(0, -2));
-  setTimeout(() => process.stdout.write(`${header.slice(-2)}${payload}`), 10);
+function holdFrameRemainder(framed, splitAt) {
+  if (heldFrameRemainder !== null) {
+    throw new Error("only one fragmented response may be held at a time");
+  }
+  heldFrameRemainder = framed.subarray(splitAt);
+  process.stdout.write(framed.subarray(0, splitAt));
+}
+
+function holdFragmentedHeaderResult(id, result) {
+  const framed = frame({ jsonrpc: "2.0", id, result });
+  const firstCrlfEnd = framed.indexOf("\r\n") + 2;
+  // Stop after the first CRLF. The test observes these exact buffered bytes
+  // inside McpClient before it asks the fixture to release the rest.
+  holdFrameRemainder(framed, firstCrlfEnd);
+}
+
+function holdSplitUtf8Result(id, result) {
+  const framed = frame({ jsonrpc: "2.0", id, result });
+  const arrow = Buffer.from("→", "utf-8");
+  const arrowStart = framed.indexOf(arrow);
+  if (arrowStart === -1) {
+    throw new Error("split UTF-8 fixture response has no arrow marker");
+  }
+  // Leave only the first byte of the three-byte arrow in the first write.
+  // The test proves the client retained that exact byte before releasing the
+  // remainder, so OS read coalescing cannot make this case pass accidentally.
+  holdFrameRemainder(framed, arrowStart + 1);
+}
+
+function releaseHeldFrame(id) {
+  if (heldFrameRemainder === null) {
+    sendError(id, -32000, "no fragmented response is waiting");
+    return;
+  }
+  const remainder = heldFrameRemainder;
+  heldFrameRemainder = null;
+  const releaseResponse = frame({
+    jsonrpc: "2.0",
+    id,
+    result: toolText("fragment released"),
+  });
+  // One fixture write finishes the held response and carries the next complete
+  // frame. The synchronous reader test separately proves one coalesced chunk.
+  process.stdout.write(Buffer.concat([remainder, releaseResponse]));
 }
 
 function sendError(id, code, message) {
@@ -110,7 +151,15 @@ function handleToolCall(id, name) {
       return;
     }
     case "__emit_fragmented_header__": {
-      sendFragmentedResult(id, toolText("fragmented header survived"));
+      holdFragmentedHeaderResult(id, toolText("fragmented header survived"));
+      return;
+    }
+    case "__emit_split_unicode__": {
+      holdSplitUtf8Result(id, toolText("graph — degraded → retry"));
+      return;
+    }
+    case "__release_fragment__": {
+      releaseHeldFrame(id);
       return;
     }
     case "__is_error_empty_content__": {

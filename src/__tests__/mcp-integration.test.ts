@@ -79,6 +79,32 @@ async function connectClient(cwd: string): Promise<McpClient> {
   return client;
 }
 
+/**
+ * Wait until the real child-process stdout listener has retained a specific
+ * byte state. This white-box observation is deliberate: the fixture does not
+ * release its second write until the first write is visible here, so OS pipe
+ * coalescing cannot turn a fragmented-frame regression into a false pass.
+ */
+async function waitForBufferedBytes(
+  client: McpClient,
+  predicate: (bytes: Buffer) => boolean,
+  description: string,
+): Promise<Buffer> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const candidate = (client as unknown as { buffer: unknown }).buffer;
+    if (!Buffer.isBuffer(candidate)) {
+      throw new Error("MCP receive state is not byte-buffered");
+    }
+    const snapshot = Buffer.from(candidate);
+    if (predicate(snapshot)) {
+      return snapshot;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`MCP did not retain ${description} within 5000ms`);
+}
+
 afterEach(() => {
   while (clients.length) {
     clients.pop()!.dispose();
@@ -91,6 +117,61 @@ afterAll(() => {
   for (const dir of tempDirs) {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+describe("MCP frame reader state boundaries", () => {
+  it("retains exact byte state across a partial header, split code point, and coalesced frame", () => {
+    const client = new McpClient(makeWorkspace());
+    clients.push(client);
+
+    const received: string[] = [];
+    const reader = client as unknown as {
+      onData: (chunk: Buffer) => void;
+      handleMessage: (raw: string) => void;
+    };
+    reader.handleMessage = (raw) => received.push(raw);
+
+    const firstPayload = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 41,
+      result: { content: [{ type: "text", text: "graph → ready" }] },
+    });
+    const secondPayload = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 42,
+      result: { content: [{ type: "text", text: "next frame" }] },
+    });
+    const makeFrame = (payload: string) =>
+      Buffer.concat([
+        Buffer.from(
+          `Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n`,
+          "ascii",
+        ),
+        Buffer.from(payload, "utf-8"),
+      ]);
+    const firstFrame = makeFrame(firstPayload);
+    const secondFrame = makeFrame(secondPayload);
+    const firstCrlfEnd = firstFrame.indexOf("\r\n") + 2;
+    const arrowStart = firstFrame.indexOf(Buffer.from("→", "utf-8"));
+    expect(firstCrlfEnd).toBeGreaterThan(1);
+    expect(arrowStart).toBeGreaterThan(firstCrlfEnd);
+
+    // Feed 1 ends after the first header CRLF. Nothing can dispatch yet.
+    reader.onData(firstFrame.subarray(0, firstCrlfEnd));
+    expect(received).toEqual([]);
+
+    // Feed 2 completes the header but stops after byte one of a three-byte
+    // arrow. Decoding this chunk independently would corrupt the code point.
+    reader.onData(firstFrame.subarray(firstCrlfEnd, arrowStart + 1));
+    expect(received).toEqual([]);
+
+    // Feed 3 finishes the code point and carries the next complete frame in
+    // the same chunk. The reader must drain both payloads in order.
+    reader.onData(
+      Buffer.concat([firstFrame.subarray(arrowStart + 1), secondFrame]),
+    );
+    expect(received).toEqual([firstPayload, secondPayload]);
+  });
 });
 
 describe("MCP live integration (real subprocess, real stdio transport)", () => {
@@ -139,7 +220,7 @@ describe("MCP live integration (real subprocess, real stdio transport)", () => {
     const workspace = makeWorkspace();
     const client = await connectClient(workspace);
 
-    const unicode = await client.callTool("__emit_unicode__", {}, 1_000);
+    const unicode = await client.callTool("__emit_unicode__", {}, 5_000);
     expect(unicode).toBe("graph — degraded → retry");
 
     // The control proves that consuming the multibyte frame did not eat bytes
@@ -147,7 +228,7 @@ describe("MCP live integration (real subprocess, real stdio transport)", () => {
     const echoed = await client.callToolJson<{ cwd: string }>(
       "echo_cwd",
       {},
-      1_000
+      10_000
     );
     expect(echoed.cwd).toBe(workspace);
   });
@@ -156,19 +237,66 @@ describe("MCP live integration (real subprocess, real stdio transport)", () => {
     const workspace = makeWorkspace();
     const client = await connectClient(workspace);
 
-    const fragmented = await client.callTool(
+    const fragmentedPromise = client.callTool(
       "__emit_fragmented_header__",
       {},
-      1_000
+      10_000
     );
-    expect(fragmented).toBe("fragmented header survived");
+    void fragmentedPromise.catch(() => undefined);
 
-    // The control proves the delayed frame left no partial header or payload
-    // behind to corrupt the next response.
+    const heldHeader = await waitForBufferedBytes(
+      client,
+      (bytes) =>
+        /^Content-Length:\s*\d+\r\n$/i.test(bytes.toString("ascii")),
+      "the partial Content-Length header",
+    );
+    expect(heldHeader.includes(Buffer.from("\r\n\r\n", "ascii"))).toBe(false);
+
+    // The fixture releases the held bytes and a complete second response in
+    // one fixture write. Both pending ids must dispatch from the stream.
+    const releasePromise = client.callTool("__release_fragment__", {}, 10_000);
+    const [fragmented, released] = await Promise.all([
+      fragmentedPromise,
+      releasePromise,
+    ]);
+    expect(fragmented).toBe("fragmented header survived");
+    expect(released).toBe("fragment released");
+
+    // A final control proves no partial header or payload remains afterward.
     const echoed = await client.callToolJson<{ cwd: string }>(
       "echo_cwd",
       {},
-      1_000
+      5_000
+    );
+    expect(echoed.cwd).toBe(workspace);
+  });
+
+  it("retains a split UTF-8 code point and drains a coalesced next frame", async () => {
+    const workspace = makeWorkspace();
+    const client = await connectClient(workspace);
+
+    const unicodePromise = client.callTool("__emit_split_unicode__", {}, 10_000);
+    void unicodePromise.catch(() => undefined);
+
+    const heldPayload = await waitForBufferedBytes(
+      client,
+      (bytes) => bytes.length > 0 && bytes[bytes.length - 1] === 0xe2,
+      "the first byte of a split UTF-8 arrow",
+    );
+    expect(heldPayload.subarray(-1)).toEqual(Buffer.from([0xe2]));
+
+    const releasePromise = client.callTool("__release_fragment__", {}, 10_000);
+    const [unicode, released] = await Promise.all([
+      unicodePromise,
+      releasePromise,
+    ]);
+    expect(unicode).toBe("graph — degraded → retry");
+    expect(released).toBe("fragment released");
+
+    const echoed = await client.callToolJson<{ cwd: string }>(
+      "echo_cwd",
+      {},
+      5_000,
     );
     expect(echoed.cwd).toBe(workspace);
   });
