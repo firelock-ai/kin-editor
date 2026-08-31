@@ -13,7 +13,10 @@
 // semantic claims; validating the editor against the real `kin mcp start`
 // binary is a separate, daemon-dependent step.
 
-let buffer = "";
+// Content-Length is a byte count, so the fixture must parse incoming frames as
+// bytes too. Repeating the editor's old string-buffer bug here would let the
+// test transport agree with itself while disagreeing with the MCP protocol.
+let buffer = Buffer.alloc(0);
 
 function send(msg) {
   const payload = JSON.stringify(msg);
@@ -24,6 +27,15 @@ function send(msg) {
 
 function sendResult(id, result) {
   send({ jsonrpc: "2.0", id, result });
+}
+
+function sendFragmentedResult(id, result) {
+  const payload = JSON.stringify({ jsonrpc: "2.0", id, result });
+  const header = `Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n`;
+  // Stop after the first CRLF. A stateful reader must retain this partial
+  // header until the second CRLF and payload arrive in the next chunk.
+  process.stdout.write(header.slice(0, -2));
+  setTimeout(() => process.stdout.write(`${header.slice(-2)}${payload}`), 10);
 }
 
 function sendError(id, code, message) {
@@ -88,6 +100,17 @@ function handleToolCall(id, name) {
       // A well-formed JSON-RPC envelope whose tool text is NOT JSON — the exact
       // "broken/unavailable daemon reply looks like an empty graph" trap.
       sendResult(id, toolText("the daemon is still warming up, not json"));
+      return;
+    }
+    case "__emit_unicode__": {
+      // A non-ASCII payload makes UTF-8 byte length differ from JavaScript
+      // string length. This deterministically reproduces v0.1.7's byte-count
+      // defect without claiming the exact live response bytes were captured.
+      sendResult(id, toolText("graph — degraded → retry"));
+      return;
+    }
+    case "__emit_fragmented_header__": {
+      sendFragmentedResult(id, toolText("fragmented header survived"));
       return;
     }
     case "__is_error_empty_content__": {
@@ -162,24 +185,24 @@ function drain() {
   for (;;) {
     const headerEnd = buffer.indexOf("\r\n\r\n");
     if (headerEnd === -1) break;
-    const header = buffer.slice(0, headerEnd);
+    const header = buffer.subarray(0, headerEnd).toString("ascii");
     const match = header.match(/Content-Length:\s*(\d+)/i);
     if (!match) {
-      buffer = buffer.slice(headerEnd + 4);
+      buffer = buffer.subarray(headerEnd + 4);
       continue;
     }
     const length = parseInt(match[1], 10);
     const start = headerEnd + 4;
     if (buffer.length < start + length) break;
-    const payload = buffer.slice(start, start + length);
-    buffer = buffer.slice(start + length);
+    const payloadEnd = start + length;
+    const payload = buffer.subarray(start, payloadEnd).toString("utf-8");
+    buffer = buffer.subarray(payloadEnd);
     handleMessage(payload);
   }
 }
 
-process.stdin.setEncoding("utf-8");
 process.stdin.on("data", (chunk) => {
-  buffer += chunk;
+  buffer = Buffer.concat([buffer, chunk]);
   drain();
 });
 process.stdin.on("end", () => process.exit(0));

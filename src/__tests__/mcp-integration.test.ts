@@ -135,6 +135,44 @@ describe("MCP live integration (real subprocess, real stdio transport)", () => {
     expect(() => JSON.parse(text)).toThrow();
   });
 
+  it("frames UTF-8 responses by bytes and keeps the next response aligned", async () => {
+    const workspace = makeWorkspace();
+    const client = await connectClient(workspace);
+
+    const unicode = await client.callTool("__emit_unicode__", {}, 1_000);
+    expect(unicode).toBe("graph — degraded → retry");
+
+    // The control proves that consuming the multibyte frame did not eat bytes
+    // from the next Content-Length header.
+    const echoed = await client.callToolJson<{ cwd: string }>(
+      "echo_cwd",
+      {},
+      1_000
+    );
+    expect(echoed.cwd).toBe(workspace);
+  });
+
+  it("retains a fragmented Content-Length header and keeps the next response aligned", async () => {
+    const workspace = makeWorkspace();
+    const client = await connectClient(workspace);
+
+    const fragmented = await client.callTool(
+      "__emit_fragmented_header__",
+      {},
+      1_000
+    );
+    expect(fragmented).toBe("fragmented header survived");
+
+    // The control proves the delayed frame left no partial header or payload
+    // behind to corrupt the next response.
+    const echoed = await client.callToolJson<{ cwd: string }>(
+      "echo_cwd",
+      {},
+      1_000
+    );
+    expect(echoed.cwd).toBe(workspace);
+  });
+
   it("marks the client disconnected when the server process crashes", async () => {
     const client = await connectClient(makeWorkspace());
     expect(client.isConnected()).toBe(true);
