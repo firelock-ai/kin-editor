@@ -121,7 +121,10 @@ export class McpClient implements vscode.Disposable {
   private process: ChildProcess | null = null;
   private nextId = 1;
   private pending = new Map<number, PendingRequest>();
-  private buffer = "";
+  // Content-Length is measured in bytes, so keep framing state as bytes until
+  // one complete payload is available. Decoding chunks first makes UTF-8 byte
+  // offsets diverge from JavaScript string offsets.
+  private buffer = Buffer.alloc(0);
   private initialized = false;
   private disposed = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -208,7 +211,7 @@ export class McpClient implements vscode.Disposable {
     });
 
     proc.stdout!.on("data", (chunk: Buffer) => {
-      this.onData(chunk.toString("utf-8"));
+      this.onData(chunk);
     });
 
     proc.stderr!.on("data", (chunk: Buffer) => {
@@ -254,7 +257,7 @@ export class McpClient implements vscode.Disposable {
       this.process = null;
     }
     this.initialized = false;
-    this.buffer = "";
+    this.buffer = Buffer.alloc(0);
     this.rejectAllPending("MCP process killed");
   }
 
@@ -270,8 +273,8 @@ export class McpClient implements vscode.Disposable {
    * Parse incoming data using Content-Length framing.
    * The MCP server sends: `Content-Length: N\r\n\r\n{json payload}`
    */
-  private onData(chunk: string): void {
-    this.buffer += chunk;
+  private onData(chunk: Buffer): void {
+    this.buffer = Buffer.concat([this.buffer, chunk]);
     this.drainBuffer();
   }
 
@@ -280,7 +283,9 @@ export class McpClient implements vscode.Disposable {
       // Try Content-Length framing first
       const headerEnd = this.buffer.indexOf("\r\n\r\n");
       if (headerEnd !== -1) {
-        const headerBlock = this.buffer.slice(0, headerEnd);
+        const headerBlock = this.buffer
+          .subarray(0, headerEnd)
+          .toString("ascii");
         const contentLengthMatch = headerBlock.match(
           /Content-Length:\s*(\d+)/i,
         );
@@ -288,11 +293,11 @@ export class McpClient implements vscode.Disposable {
           const contentLength = parseInt(contentLengthMatch[1], 10);
           const payloadStart = headerEnd + 4;
           if (this.buffer.length >= payloadStart + contentLength) {
-            const payload = this.buffer.slice(
-              payloadStart,
-              payloadStart + contentLength,
-            );
-            this.buffer = this.buffer.slice(payloadStart + contentLength);
+            const payloadEnd = payloadStart + contentLength;
+            const payload = this.buffer
+              .subarray(payloadStart, payloadEnd)
+              .toString("utf-8");
+            this.buffer = this.buffer.subarray(payloadEnd);
             this.handleMessage(payload);
             continue;
           }
@@ -302,10 +307,21 @@ export class McpClient implements vscode.Disposable {
       }
 
       // Try bare newline-delimited JSON as fallback
-      const newlineIdx = this.buffer.indexOf("\n");
+      const newlineIdx = this.buffer.indexOf(0x0a);
       if (newlineIdx !== -1) {
-        const line = this.buffer.slice(0, newlineIdx).trim();
-        this.buffer = this.buffer.slice(newlineIdx + 1);
+        const line = this.buffer
+          .subarray(0, newlineIdx)
+          .toString("utf-8")
+          .trim();
+
+        // A Content-Length header can be split immediately after its first
+        // CRLF. Retain that partial header until the blank line and payload
+        // arrive rather than treating it as non-JSON fallback output.
+        if (headerEnd === -1 && /^Content-Length:\s*\d+$/i.test(line)) {
+          break;
+        }
+
+        this.buffer = this.buffer.subarray(newlineIdx + 1);
         if (line.length > 0 && line.startsWith("{")) {
           this.handleMessage(line);
           continue;
