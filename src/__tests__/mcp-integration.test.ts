@@ -356,7 +356,7 @@ describe("MCP live integration — full KinClient stack (beyond mocks)", () => {
     expect(overview.compatFallback).toBe(false);
   });
 
-  it("resolves search results through KinClient over the real transport", async () => {
+  it("resolves graph-native search provenance through KinClient over the real transport", async () => {
     const workspace = makeWorkspace();
     const mcp = await connectClient(workspace);
     const kin = new KinClient(workspace, mcp);

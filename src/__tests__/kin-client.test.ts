@@ -390,6 +390,43 @@ describe("KinClient", () => {
       expect(mockExecFile).not.toHaveBeenCalled();
     });
 
+    it("normalizes graph-native semantic_locate provenance and spans for navigation", async () => {
+      const mcp = {
+        isConnected: () => true,
+        callTool: jest.fn().mockResolvedValue(JSON.stringify({
+          entities: [
+            {
+              kind: "Function",
+              name: "invoiceTotal",
+              signature: "function invoiceTotal(subtotal: number, tax: number)",
+              span: [5, 7],
+              provenance: { file: "src/ledger.ts" },
+            },
+          ],
+          files: [
+            {
+              path: "src/ledger.ts",
+              symbols: ["invoiceTotal"],
+            },
+          ],
+        })),
+      };
+
+      const client = new KinClient("/workspace", mcp as never);
+      const result = await client.search("function that adds invoice subtotal and tax");
+
+      expect(result).toEqual([
+        {
+          kind: "Function",
+          name: "invoiceTotal",
+          file: "src/ledger.ts",
+          line: 5,
+          signature: "function invoiceTotal(subtotal: number, tax: number)",
+        },
+      ]);
+      expect(mockExecFile).not.toHaveBeenCalled();
+    });
+
     it("loads entities through semantic_search instead of explore_codebase", async () => {
       const mcp = {
         isConnected: () => true,

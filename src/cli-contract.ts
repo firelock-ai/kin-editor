@@ -341,11 +341,16 @@ export function readEntities(
 }
 
 export function normalizeEntity(raw: UnknownRecord): KinEntity {
+  const provenance = isRecord(raw.provenance) ? raw.provenance : {};
+  const span = Array.isArray(raw.span) ? raw.span : [];
+
   return {
     kind: String(raw.kind ?? raw.entity_kind ?? "Unknown"),
     name: String(raw.name ?? raw.entity_name ?? ""),
-    file: String(raw.file ?? raw.file_path ?? raw.read_path ?? ""),
-    line: Number(raw.line ?? raw.start_line ?? 1),
+    file: String(
+      raw.file ?? raw.file_path ?? raw.read_path ?? provenance.file ?? ""
+    ),
+    line: Number(raw.line ?? raw.start_line ?? span[0] ?? 1),
     signature: raw.signature ? String(raw.signature) : undefined,
   };
 }
