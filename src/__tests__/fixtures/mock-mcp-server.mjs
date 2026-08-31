@@ -103,8 +103,35 @@ function handleToolCall(id, name) {
       sendResult(id, toolText(JSON.stringify(body)));
       return;
     }
-    case "semantic_search":
     case "semantic_locate": {
+      sendResult(
+        id,
+        toolText(
+          JSON.stringify({
+            entities: [
+              {
+                kind: "Function",
+                name: "handler",
+                span: [10, 12],
+                provenance: { file: "src/handler.ts" },
+              },
+              {
+                kind: "Class",
+                name: "Server",
+                span: [3, 8],
+                provenance: { file: "src/server.ts" },
+              },
+            ],
+            files: [
+              { path: "src/handler.ts", symbols: ["handler"] },
+              { path: "src/server.ts", symbols: ["Server"] },
+            ],
+          })
+        )
+      );
+      return;
+    }
+    case "semantic_search": {
       sendResult(
         id,
         toolText(
