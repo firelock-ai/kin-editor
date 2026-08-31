@@ -2,6 +2,12 @@
 
 All notable changes to the Kin VS Code extension are documented in this file.
 
+## [0.1.8] - 2026-08-31
+
+### Changed
+
+- Fix MCP response framing by byte length (#88)
+
 ## [0.1.7] - 2026-08-29
 
 ### Changed
