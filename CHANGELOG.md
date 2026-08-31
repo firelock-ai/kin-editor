@@ -2,6 +2,12 @@
 
 All notable changes to the Kin VS Code extension are documented in this file.
 
+## [0.1.9] - 2026-08-31
+
+### Changed
+
+- Harden MCP framing regression proof (#90)
+
 ## [0.1.8] - 2026-08-31
 
 ### Changed
