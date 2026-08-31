@@ -2,6 +2,12 @@
 
 All notable changes to the Kin VS Code extension are documented in this file.
 
+## [0.1.10] - 2026-08-31
+
+### Changed
+
+- Resolve graph-native search result locations (#93)
+
 ## [0.1.9] - 2026-08-31
 
 ### Changed
