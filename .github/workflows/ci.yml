@@ -34,7 +34,25 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
-          cache: npm
+
+      # actions/setup-node's own `cache: npm` input has no save-if equivalent:
+      # it always saves via actions/cache internally, on every ref including
+      # every pull-request and merge-queue leg. Restore and save are split out
+      # explicitly instead, save gated on main, using the same path and key
+      # `cache: npm` would have derived (npm's own cache directory, keyed on
+      # the lockfile), so the cached content is unchanged.
+      - name: Get npm cache directory
+        id: npm-cache-dir
+        run: echo "dir=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore npm cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ steps.npm-cache-dir.outputs.dir }}
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
       - run: npm ci
       - run: npm run compile
       - run: npm run lint
@@ -60,6 +78,15 @@ jobs:
           echo "packaged kin-${version}.vsix"
       - name: Audit (high/critical)
         run: npm audit --audit-level=high
+
+      # Actions caches are scoped to the ref that saved them, so only main's
+      # cache is readable from every other ref; save only from there.
+      - name: Save npm cache
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ steps.npm-cache-dir.outputs.dir }}
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
 
   release-policy:
     runs-on: ubuntu-latest
