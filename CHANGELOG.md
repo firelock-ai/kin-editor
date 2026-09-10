@@ -2,6 +2,21 @@
 
 All notable changes to the Kin VS Code extension are documented in this file.
 
+## [0.1.11] - 2026-09-10
+
+### Changed
+
+- Replace retired positioning line in README and walkthrough (#101)
+- Save the npm cache only from main, restore it everywhere (#100)
+- Bump typescript to 6.0.3 and fix its type resolution break (#99)
+- chore(deps): bump softprops/action-gh-release from 3.0.2 to 3.0.3 (#96)
+- chore(deps): bump firelock-ai/kin-actions/.github/workflows/merge-queue-ejection-notice.yml from 0.1.31 to 0.1.34 (#97)
+- chore(deps-dev): bump globals from 17.8.0 to 17.12.0 (#70)
+- chore(deps-dev): bump @types/node from 26.1.2 to 26.3.0 (#79)
+- chore(deps-dev): bump @typescript-eslint/parser from 8.67.0 to 8.68.0 (#80)
+- chore(deps-dev): bump eslint from 10.8.1 to 10.9.1 (#81)
+- Patch npm audit advisories in js-yaml, fast-uri, and qs (#98)
+
 ## [0.1.10] - 2026-08-31
 
 ### Changed
