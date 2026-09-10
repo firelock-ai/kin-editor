@@ -1,7 +1,7 @@
 {
   "name": "kin-editor",
-  "displayName": "Kin - The system of record for AI-written software",
-  "description": "VS Code extension for Kin, the system of record for AI-written software: entity explorer, semantic search, trace, review, and rename powered by the Kin graph engine.",
+  "displayName": "Kin - Graph-native version control",
+  "description": "VS Code extension for Kin, a graph-native code repository for people and AI agents: entity explorer, semantic search, trace, review, and rename powered by the Kin graph engine.",
   "version": "0.1.11",
   "publisher": "firelock",
   "license": "Apache-2.0",
@@ -108,7 +108,7 @@
     "viewsWelcome": [
       {
         "view": "kinExplorer",
-        "contents": "Software that remembers itself.\n\nGit shows which lines changed. Kin shows what the change affects. This folder has no Kin graph yet.\n[Initialize Repository](command:kin.init)\n[Start here](command:kin.openWalkthrough)\nAlready ran kin init? Check what is wired with [Setup Workspace](command:kin.setupWorkspace).",
+        "contents": "A graph-native code repository for people and AI agents.\n\nGit shows which lines changed. Kin shows what the change affects. This folder has no Kin graph yet.\n[Initialize Repository](command:kin.init)\n[Start here](command:kin.openWalkthrough)\nAlready ran kin init? Check what is wired with [Setup Workspace](command:kin.setupWorkspace).",
         "when": "workspaceFolderCount > 0 && !kin.initialized"
       },
       {
@@ -205,7 +205,7 @@
     "walkthroughs": [
       {
         "id": "kinFirstRun",
-        "title": "Software that remembers itself.",
+        "title": "A graph-native code repository for people and AI agents.",
         "description": "Git shows which lines changed. Kin shows what the change affects.",
         "steps": [
           {
