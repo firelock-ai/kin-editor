@@ -4,9 +4,9 @@
 
 # Kin for Visual Studio Code
 
-> **Software that remembers itself.**
+> **AI changed who writes code.**
 >
-> Exact context, not more.
+> Kin changes what they build on.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Part of Kin](https://img.shields.io/badge/part%20of-Kin-6E56CF.svg)](https://github.com/firelock-ai/kin)
@@ -19,8 +19,8 @@ and semantic rename, with live daemon and graph health in the status bar.
 
 The extension does not implement a second index. It delegates queries to the
 local Kin runtime over MCP and falls back to the `kin` CLI when that connection
-is unavailable. Start with **[Kin](https://github.com/firelock-ai/kin)**, the
-semantic system of record for AI-written software.
+is unavailable. Start with **[Kin](https://github.com/firelock-ai/kin)**, a
+graph-native code repository for people and AI agents.
 
 ## Install, set up, query
 
