@@ -208,7 +208,7 @@ describe("the first-run copy is the brand canon, verbatim", () => {
   // Locked lines from docs/brand (Brand Book, "The canon - locked lines"). A
   // surface needing a headline takes one of these and does not get a new one,
   // so an edit that writes a fresh headline here has to turn this red first.
-  const NORTH_STAR = "Software that remembers itself.";
+  const NORTH_STAR = "A graph-native code repository for people and AI agents.";
   const PRODUCT_PROMISE =
     "Git shows which lines changed. Kin shows what the change affects.";
 

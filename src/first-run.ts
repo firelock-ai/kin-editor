@@ -44,7 +44,7 @@ export const FIRST_RUN_OFFERED_KEY = "kin.firstRunOffered";
  * new one.
  */
 export const FIRST_RUN_OFFER =
-  "Software that remembers itself. Git shows which lines changed. Kin shows what the change affects. This folder has no Kin graph yet.";
+  "A graph-native code repository for people and AI agents. Git shows which lines changed. Kin shows what the change affects. This folder has no Kin graph yet.";
 
 /** The action on the first-run offer that opens the walkthrough. */
 export const FIRST_RUN_ACTION = "Start here";
