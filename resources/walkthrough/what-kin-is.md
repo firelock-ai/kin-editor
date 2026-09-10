@@ -1,4 +1,4 @@
-## Software that remembers itself.
+## A graph-native code repository for people and AI agents.
 
 Git shows which lines changed. Kin shows what the change affects.
 
