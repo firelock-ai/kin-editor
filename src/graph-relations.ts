@@ -194,7 +194,7 @@ export function describeRelation(relation: GraphRelation): string {
       ? `${neighbor.name} (${neighbor.kind})`
       : neighbor.name
     : neighbor.externalKind
-      ? `a ${neighbor.externalKind} outside this repository`
+      ? `a node outside this repository (${neighbor.externalKind})`
       : (neighbor.id ?? "an entity the graph did not return");
   return `${verb} ${subject}${resolutionSuffix(relation.resolution)}`;
 }
