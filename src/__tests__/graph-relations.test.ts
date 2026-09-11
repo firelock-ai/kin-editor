@@ -82,7 +82,12 @@ describe("readNeighborhood", () => {
 
     expect(imports?.neighbor.name).toBeUndefined();
     expect(imports?.neighbor.externalKind).toBe("ExternalReference");
-    expect(describeRelation(imports!)).toContain("outside this repository");
+    // The exact line, because the old wording put the variant name after an
+    // article ("a ExternalReference", "a Artifact"), and two of the six
+    // GraphNodeId variants that are not entities start with a vowel.
+    expect(describeRelation(imports!)).toBe(
+      "Imports a node outside this repository (ExternalReference) [resolved within an imported scope]"
+    );
   });
 
   it("drops an edge traversed from a neighbor rather than from the focal", () => {
