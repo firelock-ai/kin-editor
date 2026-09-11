@@ -6,6 +6,11 @@ import { GraphAvailability, KinClient, KinEntity } from "./kin-client";
 import { isAbsolute, join } from "path";
 import { logError } from "./logger";
 import {
+  graphEmptyNotice,
+  graphStateNotice,
+  graphUnavailableNotice,
+} from "./graph-state-notice";
+import {
   formatEntityAccessibilityLabel,
   formatEntityDescription,
   formatEntityTooltip,
@@ -211,82 +216,24 @@ export class EntityExplorerProvider
  * show, or `undefined` when the graph is genuinely indexed and entities should
  * be listed. This is what keeps "unreachable" / "unreadable response" from
  * masquerading as an empty graph.
+ *
+ * The sentences themselves live in `graph-state-notice`, because the graph
+ * browser renders the same states and two copies of this wording would start
+ * disagreeing about what a state means.
  */
 function infoNodeForAvailability(
   availability: GraphAvailability
 ): InfoNode | undefined {
-  switch (availability) {
-    case "warming":
-      return graphWarmingNode();
-    case "contract-drift":
-      return graphContractDriftNode();
-    case "not-indexed":
-      return graphNotIndexedNode();
-    case "unavailable":
-      return graphUnavailableNode();
-    case "invalid-response":
-      return graphInvalidResponseNode();
-    case "empty":
-      return graphEmptyNode();
-    case "indexed":
-      return undefined;
-    default:
-      return undefined;
-  }
-}
-
-function graphNotIndexedNode(): InfoNode {
-  return {
-    type: "info",
-    message: "Graph not indexed yet",
-    tooltip:
-      "Kin has not indexed this workspace yet. Run Kin: Setup Workspace or wait for the daemon to finish indexing, then refresh.",
-  };
-}
-
-function graphWarmingNode(): InfoNode {
-  return {
-    type: "info",
-    message: "Kin graph is starting up",
-    tooltip:
-      "The Kin daemon is still starting, so the graph has nothing to show yet. This is startup latency, not an empty graph. A large repository can take minutes on a cold start. Refresh once it is ready.",
-  };
-}
-
-function graphContractDriftNode(): InfoNode {
-  return {
-    type: "info",
-    message: "Kin CLI version mismatch",
-    tooltip:
-      "The kin CLI answered in a shape this extension cannot read. This is a version mismatch, not an empty graph. Update the Kin VS Code extension, or update the kin CLI, so the two agree, then refresh.",
-  };
-}
-
-function graphInvalidResponseNode(): InfoNode {
-  return {
-    type: "info",
-    message: "Kin graph returned an unreadable response",
-    tooltip:
-      "The Kin daemon replied with data the editor could not parse. This is a broken or still-starting daemon, not an empty graph. Check that the kin daemon is healthy, then refresh.",
-  };
+  const notice = graphStateNotice(availability);
+  return notice ? { type: "info", ...notice } : undefined;
 }
 
 function graphEmptyNode(): InfoNode {
-  return {
-    type: "info",
-    message: "No entities found",
-    tooltip:
-      "The Kin graph is reachable but reported no entities yet. Indexing may still be in progress — refresh to retry.",
-  };
+  return { type: "info", ...graphEmptyNotice() };
 }
 
 function graphUnavailableNode(): InfoNode {
-  return {
-    type: "info",
-    message: "Kin graph unavailable",
-    tooltip:
-      "Could not reach the Kin graph. Check that the kin binary is installed and the daemon is running, then refresh.",
-  };
+  return { type: "info", ...graphUnavailableNotice() };
 }
 
 function iconForKind(kind: string): vscode.ThemeIcon {

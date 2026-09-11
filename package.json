@@ -78,13 +78,18 @@
       },
       {
         "command": "kin.refresh",
-        "title": "Kin: Refresh Entity Explorer",
+        "title": "Kin: Refresh the Graph View",
         "category": "Kin",
         "icon": "$(refresh)"
       },
       {
         "command": "kin.openWalkthrough",
         "title": "Kin: Start Here",
+        "category": "Kin"
+      },
+      {
+        "command": "kin.openEntity",
+        "title": "Kin: Open Entity from the Graph",
         "category": "Kin"
       }
     ],
@@ -100,8 +105,14 @@
     "views": {
       "kin": [
         {
+          "id": "kinGraph",
+          "name": "Graph Browser",
+          "when": "config.kin.entityViewer"
+        },
+        {
           "id": "kinExplorer",
-          "name": "Entity Explorer"
+          "name": "Entity Explorer",
+          "when": "!config.kin.entityViewer"
         }
       ]
     },
@@ -112,7 +123,17 @@
         "when": "workspaceFolderCount > 0 && !kin.initialized"
       },
       {
+        "view": "kinGraph",
+        "contents": "A graph-native code repository for people and AI agents.\n\nGit shows which lines changed. Kin shows what the change affects. This folder has no Kin graph yet.\n[Initialize Repository](command:kin.init)\n[Start here](command:kin.openWalkthrough)\nAlready ran kin init? Check what is wired with [Setup Workspace](command:kin.setupWorkspace).",
+        "when": "workspaceFolderCount > 0 && !kin.initialized"
+      },
+      {
         "view": "kinExplorer",
+        "contents": "Kin needs an open folder.\n\nOpen the repository you want to work in, then come back here.\n[Open Folder](command:vscode.openFolder)\n[Start here](command:kin.openWalkthrough)",
+        "when": "workspaceFolderCount == 0"
+      },
+      {
+        "view": "kinGraph",
         "contents": "Kin needs an open folder.\n\nOpen the repository you want to work in, then come back here.\n[Open Folder](command:vscode.openFolder)\n[Start here](command:kin.openWalkthrough)",
         "when": "workspaceFolderCount == 0"
       }
@@ -121,7 +142,7 @@
       "view/title": [
         {
           "command": "kin.refresh",
-          "when": "view == kinExplorer",
+          "when": "view == kinExplorer || view == kinGraph",
           "group": "navigation"
         }
       ],
@@ -199,6 +220,11 @@
           "type": "boolean",
           "default": true,
           "description": "Use a persistent MCP connection to the Kin graph for zero-overhead queries. Disable to fall back to one CLI subprocess per command. Hover and go-to-definition run only over MCP and return nothing while it is off."
+        },
+        "kin.entityViewer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Browse the Kin graph by namespace and kind, and open an entity as a read-only kin:// document served from graph-owned truth, with the daemon's semantic findings on it. Turn this off to go back to the file-first Entity Explorer, which opens the projected file instead. The viewer needs the MCP graph path (kin.mcpEnabled) and never falls back to reading files."
         }
       }
     },
@@ -245,7 +271,7 @@
           {
             "id": "kin.step.findYourWay",
             "title": "Find your way around",
-            "description": "The Kin icon in the activity bar opens the Entity Explorer, listed from the graph rather than from a file tree. Search, trace, review and overview all answer from the same graph.\n[Ask the graph a question](command:kin.search)",
+            "description": "The Kin icon in the activity bar opens the Graph Browser, grouped by namespace and kind rather than by folder. Open an entity and you read its body as the graph serves it.\n[Ask the graph a question](command:kin.search)",
             "media": {
               "markdown": "resources/walkthrough/find-your-way.md"
             },

@@ -104,30 +104,39 @@ describe("the extension contributes a first run", () => {
     expect(walkthrough.steps.length).toBeGreaterThan(2);
   });
 
-  it("ships welcome content on the entity explorer for a workspace with no graph", () => {
+  it("ships welcome content on every contributed view for a workspace with no graph", () => {
     const viewIds = Object.values(manifest.contributes.views).flatMap((views) =>
       views.map((v) => v.id)
     );
-    const welcomed = manifest.contributes.viewsWelcome.filter((w) =>
-      viewIds.includes(w.view)
-    );
-    expect(welcomed.length).toBeGreaterThan(0);
+    expect(viewIds.length).toBeGreaterThan(0);
 
     // The state the coldwalk actually hit: a folder is open and it carries no
     // Kin store. A welcome block that only covered the no-folder case would
     // leave that panel exactly as empty as it was.
-    const noGraph = welcomed.filter(
-      (w) => w.when?.includes("!kin.initialized")
-    );
-    expect(noGraph).toHaveLength(1);
-    expect(noGraph[0].when).toContain("workspaceFolderCount > 0");
+    //
+    // Asserted PER VIEW rather than once over the manifest. Two views are
+    // contributed now, one shown when the entity viewer is on and one when it
+    // is off, and a count over the whole manifest would pass while the view a
+    // user is actually looking at had nothing.
+    for (const view of viewIds) {
+      const noGraph = manifest.contributes.viewsWelcome.filter(
+        (w) => w.view === view && w.when?.includes("!kin.initialized")
+      );
+      expect([view, noGraph.length]).toEqual([view, 1]);
+      expect(noGraph[0].when).toContain("workspaceFolderCount > 0");
+    }
   });
 
-  it("covers the window with no folder open as well", () => {
-    const noFolder = manifest.contributes.viewsWelcome.filter((w) =>
-      w.when?.includes("workspaceFolderCount == 0")
+  it("covers the window with no folder open on every contributed view as well", () => {
+    const viewIds = Object.values(manifest.contributes.views).flatMap((views) =>
+      views.map((v) => v.id)
     );
-    expect(noFolder).toHaveLength(1);
+    for (const view of viewIds) {
+      const noFolder = manifest.contributes.viewsWelcome.filter(
+        (w) => w.view === view && w.when?.includes("workspaceFolderCount == 0")
+      );
+      expect([view, noFolder.length]).toEqual([view, 1]);
+    }
   });
 
   it("sets the context key its welcome content keys on", () => {

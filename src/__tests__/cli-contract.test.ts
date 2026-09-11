@@ -235,6 +235,10 @@ describe("readEntities", () => {
       file: "router.py",
       line: 20,
       signature: "def build_router(config)",
+      // The recorded payload carries a graph id, which is what a kin:// entity
+      // document resolves through. Asserted against the fixture rather than
+      // assumed, because an answer without one cannot be opened at all.
+      id: "453321fb-0a75-419b-9ef6-37fc81d61330",
     });
     // Every element normalises to the four fields the UI dereferences, so no
     // pane can render "undefined:undefined" off a well-formed answer.

@@ -352,6 +352,14 @@ export function normalizeEntity(raw: UnknownRecord): KinEntity {
     ),
     line: Number(raw.line ?? raw.start_line ?? span[0] ?? 1),
     signature: raw.signature ? String(raw.signature) : undefined,
+    // Carried when the answer has one, and the KEY is absent otherwise rather
+    // than present holding `undefined`: the graph id is the only thing a
+    // `kin://` document resolves through, and an entity that arrived without
+    // one is listed and simply cannot be opened, rather than opened against a
+    // guessed id. Measured on the checked-in kin 0.6.0 `search` fixture, which
+    // does publish `id`.
+    ...(raw.id ? { id: String(raw.id) } : {}),
+    ...(raw.language ? { language: String(raw.language) } : {}),
   };
 }
 

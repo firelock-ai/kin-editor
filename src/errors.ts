@@ -41,6 +41,27 @@ export class ParseError extends KinError {
 }
 
 /**
+ * A graph-only read was asked for while the graph path was not available.
+ *
+ * The entity viewer serves documents out of graph truth and has no fallback by
+ * design: the umbrella's zero-file-search rule puts raw file reads outside
+ * every runtime answer path, so the honest outcome when the graph cannot answer
+ * is a refusal naming what is missing. Reading the file off disk and showing it
+ * as the entity's body would be the exact drift the rule exists to stop, and it
+ * would look identical to a working viewer.
+ */
+export class GraphUnavailableError extends KinError {
+  constructor(detail: string) {
+    super(
+      `Kin cannot serve this entity from the graph: ${detail} The entity viewer reads graph-owned truth ` +
+        `only and does not fall back to reading files, so nothing is shown rather than something that ` +
+        `did not come from the graph.`
+    );
+    this.name = "GraphUnavailableError";
+  }
+}
+
+/**
  * A `kin <command> --json` call succeeded and parsed, but answered in a shape
  * the CLI fallback reader cannot use. This is its own error because it is not a
  * failure of the runtime: the binary ran, exited 0 and emitted valid JSON. The

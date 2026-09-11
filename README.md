@@ -97,8 +97,20 @@ active path as MCP or CLI, and the extension never searches files on its own.
 
 ## Features
 
-- **Entity Explorer:** semantic entities from the graph rather than another
-  filesystem tree.
+- **Graph Browser:** the graph's entities grouped by namespace and kind, listed
+  by name rather than by folder. An entity whose graph name carries no namespace
+  is grouped under a row that says so instead of being filed under a directory.
+- **Entity documents** (`kin://`): open an entity and read its body as the graph
+  serves it, with its kind and name in the tab and its signature, provenance and
+  relations in the hover. Read-only for now, and the refusal to save says why.
+  Nothing here reads a file: when the graph cannot answer, the viewer says which
+  part could not rather than showing bytes the graph never served.
+- **Graph diagnostics:** what the daemon disclosed about the answer, on the
+  entity you are looking at. Degraded producers, a partial answer, call sites the
+  parser saw and the linker resolved into nothing, pending embeddings and the
+  standing fact that enrichment completion is never attested.
+  Set `kin.entityViewer` to `false` for the older file-first Entity Explorer,
+  which opens the projected file instead.
 - **Semantic Search** (`Cmd/Ctrl+Shift+K S`): natural-language retrieval through
   `semantic_locate`, with results in a navigable picker. Workspace symbol search
   (`Cmd/Ctrl+T`) uses Kin's name-pattern graph search.
