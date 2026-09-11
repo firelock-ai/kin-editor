@@ -43,7 +43,14 @@ jobs:
         run: node ./scripts/package-vsix.mjs
         env:
           TAG_NAME: ${{ github.ref_name }}
+      # Marketplace and Open VSX are two independent targets, so a stuck Marketplace
+      # publish must not stop Open VSX from ever being attempted (all four v0.1.11
+      # attempts died on Marketplace before Open VSX ever ran). Both publish steps
+      # below carry continue-on-error and run back to back; "Require both publish
+      # targets succeeded" at the end is what actually fails the job.
       - name: Publish VSIX to Visual Studio Marketplace
+        id: marketplace_publish
+        continue-on-error: true
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
           VSCE_TOKEN: ${{ secrets.VSCE_TOKEN }}
@@ -85,26 +92,9 @@ jobs:
           }
           NODE
 
-      - name: Verify exact Visual Studio Marketplace version
-        env:
-          RELEASE_VERSION: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          version="${RELEASE_VERSION#v}"
-          for attempt in $(seq 1 20); do
-            if ./node_modules/.bin/vsce show firelock.kin-editor --json \
-              | jq -e --arg version "$version" \
-                '.versions | any(.version == $version)' >/dev/null; then
-              echo "Visual Studio Marketplace exposes firelock.kin-editor ${version}"
-              exit 0
-            fi
-            echo "Marketplace version ${version} not visible yet (attempt ${attempt}/20)"
-            sleep 15
-          done
-          echo "::error::Visual Studio Marketplace does not expose firelock.kin-editor ${version}"
-          exit 1
-
       - name: Publish VSIX to Open VSX
+        id: openvsx_publish
+        continue-on-error: true
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
           OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
@@ -140,7 +130,32 @@ jobs:
             attempt=$((attempt + 1))
           done
 
+      - name: Verify exact Visual Studio Marketplace version
+        id: marketplace_verify
+        continue-on-error: true
+        if: steps.marketplace_publish.outcome == 'success'
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_VERSION#v}"
+          for attempt in $(seq 1 20); do
+            if ./node_modules/.bin/vsce show firelock.kin-editor --json \
+              | jq -e --arg version "$version" \
+                '.versions | any(.version == $version)' >/dev/null; then
+              echo "Visual Studio Marketplace exposes firelock.kin-editor ${version}"
+              exit 0
+            fi
+            echo "Marketplace version ${version} not visible yet (attempt ${attempt}/20)"
+            sleep 15
+          done
+          echo "::error::Visual Studio Marketplace does not expose firelock.kin-editor ${version}"
+          exit 1
+
       - name: Verify exact Open VSX version
+        id: openvsx_verify
+        continue-on-error: true
+        if: steps.openvsx_publish.outcome == 'success'
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
         run: |
@@ -161,8 +176,44 @@ jobs:
           exit 1
 
       - name: Publish verified GitHub release
+        if: >-
+          steps.marketplace_publish.outcome == 'success' &&
+          steps.marketplace_verify.outcome == 'success' &&
+          steps.openvsx_publish.outcome == 'success' &&
+          steps.openvsx_verify.outcome == 'success'
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: kin-*.vsix
+
+      # continue-on-error above keeps each publish/verify from blocking the other
+      # target, which also means none of those failures fail the JOB on their own.
+      # This is the step that actually does: read every outcome and fail loud if
+      # either target did not fully publish and verify, so release-recovery.yml's
+      # existing rerun-then-escalate flow still triggers exactly as before.
+      - name: Require both publish targets succeeded
+        if: always()
+        run: |
+          set -euo pipefail
+          mp_publish="${{ steps.marketplace_publish.outcome }}"
+          mp_verify="${{ steps.marketplace_verify.outcome }}"
+          ovsx_publish="${{ steps.openvsx_publish.outcome }}"
+          ovsx_verify="${{ steps.openvsx_verify.outcome }}"
+          echo "Marketplace: publish=${mp_publish} verify=${mp_verify}"
+          echo "Open VSX:    publish=${ovsx_publish} verify=${ovsx_verify}"
+
+          marketplace_ok=0
+          if [ "$mp_publish" = "success" ] && [ "$mp_verify" = "success" ]; then
+            marketplace_ok=1
+          fi
+          openvsx_ok=0
+          if [ "$ovsx_publish" = "success" ] && [ "$ovsx_verify" = "success" ]; then
+            openvsx_ok=1
+          fi
+
+          if [ "$marketplace_ok" -ne 1 ] || [ "$openvsx_ok" -ne 1 ]; then
+            echo "::error::at least one publish target did not fully succeed (marketplace publish=${mp_publish}/verify=${mp_verify}, openvsx publish=${ovsx_publish}/verify=${ovsx_verify})"
+            exit 1
+          fi
+          echo "Both Visual Studio Marketplace and Open VSX published and verified."
