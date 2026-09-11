@@ -6,6 +6,13 @@ name: Diagnose Marketplace Connectivity
 # without touching a real release. Separates "the gallery is unreachable from the
 # runner" from "the publish call alone hangs": if verify-pat and show answer fast
 # here, the timeout is specific to the publish call, not general connectivity.
+#
+# Deliberately does NOT declare `environment: marketplace-publish`: that
+# environment's deployment policy allows only the v*.*.* tag pattern (confirmed via
+# the API, not assumed), so a job declaring it cannot be workflow_dispatched on any
+# branch at all and is rejected before a runner is even assigned. VSCE_TOKEN and
+# OVSX_TOKEN are plain repository secrets, not environment secrets (also confirmed
+# via the API), so they stay readable here without that declaration.
 on:
   workflow_dispatch:
 
@@ -16,7 +23,6 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: marketplace-publish
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
