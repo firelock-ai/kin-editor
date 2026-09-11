@@ -1,0 +1,64 @@
+name: Diagnose Marketplace Connectivity
+
+# Manual, read-only diagnostic for the gallery-timeout class in #104/#77/#60. Runs
+# on the same runner image and with the same publish credentials as release.yml's
+# `release` job, but never publishes anything, so it can be dispatched at any time
+# without touching a real release. Separates "the gallery is unreachable from the
+# runner" from "the publish call alone hangs": if verify-pat and show answer fast
+# here, the timeout is specific to the publish call, not general connectivity.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: marketplace-publish
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+      - run: npm ci
+
+      - name: DIAG pinned @vscode/vsce version
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./node_modules/@vscode/vsce/package.json').version")"
+          echo "DIAG vsce_version=${version}"
+
+      - name: DIAG time vsce verify-pat
+        env:
+          VSCE_TOKEN: ${{ secrets.VSCE_TOKEN }}
+        run: |
+          set -uo pipefail
+          : "${VSCE_TOKEN:?VSCE_TOKEN is required for this diagnostic}"
+          publisher="$(node -p "require('./package.json').publisher")"
+          start="$SECONDS"
+          ./node_modules/.bin/vsce verify-pat "$publisher" -p "$VSCE_TOKEN"
+          rc=$?
+          elapsed=$((SECONDS - start))
+          echo "DIAG verify_pat rc=${rc} elapsed=${elapsed}s"
+
+      - name: DIAG time vsce show (read-only)
+        run: |
+          set -uo pipefail
+          name="$(node -p "require('./package.json').publisher + '.' + require('./package.json').name")"
+          start="$SECONDS"
+          ./node_modules/.bin/vsce show "$name" >/dev/null
+          rc=$?
+          elapsed=$((SECONDS - start))
+          echo "DIAG vsce_show rc=${rc} elapsed=${elapsed}s"
+
+      - name: DIAG time raw curl against the gallery API host (30s cap)
+        run: |
+          set -uo pipefail
+          start="$SECONDS"
+          http_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+            "https://marketplace.visualstudio.com/_apis/public/gallery")"
+          rc=$?
+          elapsed=$((SECONDS - start))
+          echo "DIAG gallery_curl http_code=${http_code:-none} rc=${rc} elapsed=${elapsed}s"
