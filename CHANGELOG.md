@@ -2,6 +2,24 @@
 
 All notable changes to the Kin VS Code extension are documented in this file.
 
+## [0.1.12] - 2026-09-11
+
+### Changed
+
+- Open a Kin entity as a read-only kin:// document (#108)
+- Clear an entity document's diagnostics when it closes (#109)
+- Name a non-entity relation endpoint without a broken article (#110)
+- Retry Marketplace and Open VSX publish steps on gallery timeout (#107)
+- Decouple Marketplace and Open VSX publish, add a connectivity diagnostic (#111)
+- Drop the tag-only environment gate from the marketplace diagnostic (#112)
+
+### Note
+
+v0.1.11 was tagged but never published to either marketplace: its publish step timed out against
+the Visual Studio Marketplace gallery API on every attempt (see kin-editor#104). This release
+carries the same changes plus the publish-reliability fix above and supersedes it; v0.1.11's tag
+is left in place, unpublished.
+
 ## [0.1.11] - 2026-09-10
 
 ### Changed
