@@ -235,6 +235,27 @@ describe("dangling references from edge_coverage", () => {
     ).toEqual([]);
   });
 
+  it("treats an unmeasured RESOLVED side as unmeasured too", () => {
+    // The other half, and the half a mutation survived: with a measured parse
+    // count beside an unmeasured resolution, reading the missing side as zero
+    // publishes "0 of 12 call sites resolved", which is the loudest possible
+    // claim drawn from a population nothing counted. The case above cannot
+    // catch that, because a zeroed parse side never exceeds anything.
+    expect(
+      findingsFromPayload({
+        edge_coverage: {
+          language: "go",
+          reference_resolution: {
+            parsed_call_sites: 12,
+            resolved_call_edges: null,
+            parsed_import_statements: 8,
+            resolved_import_statements: null,
+          },
+        },
+      })
+    ).toEqual([]);
+  });
+
   it("separates an unproduced class from an absent one", () => {
     const findings = findingsFromPayload({
       edge_coverage: {
