@@ -3,6 +3,14 @@
 
 import * as vscode from "vscode";
 import { EntityExplorerProvider } from "./entity-explorer";
+import { GraphBrowserProvider } from "./graph-browser";
+import { GraphDiagnostics } from "./graph-diagnostics";
+import {
+  KinEntityFileSystemProvider,
+  entityUri,
+  workspaceKeyFor,
+} from "./entity-viewer";
+import { KinEntityHoverProvider } from "./providers/entity-hover-provider";
 import { KinStatusBar } from "./status-bar";
 import { KinHoverProvider } from "./providers/hover-provider";
 import { KinDefinitionProvider } from "./providers/definition-provider";
@@ -46,6 +54,7 @@ const CONTRIBUTED_COMMANDS = [
   "kin.review",
   "kin.refresh",
   "kin.openWalkthrough",
+  "kin.openEntity",
 ] as const;
 
 /**
@@ -126,7 +135,12 @@ export function activate(context: vscode.ExtensionContext): void {
     // viewsWelcome block renders into: the coldwalk found an empty panel with
     // no explanation and no next step, and this is the panel it found.
     context.subscriptions.push(
-      vscode.window.registerTreeDataProvider("kinExplorer", EMPTY_EXPLORER)
+      vscode.window.registerTreeDataProvider("kinExplorer", EMPTY_EXPLORER),
+      // Both views are contributed, and which one is visible is decided by the
+      // kin.entityViewer setting's `when` clause rather than by this branch. A
+      // contributed view with no registered provider renders an error where the
+      // welcome content should be, so the empty one is registered for both.
+      vscode.window.registerTreeDataProvider("kinGraph", EMPTY_EXPLORER)
     );
 
     const guideToSetup = async () => {
@@ -144,9 +158,15 @@ export function activate(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(
       vscode.commands.registerCommand("kin.init", () => initGraph(folders)),
-      ...["kin.search", "kin.overview", "kin.trace", "kin.status", "kin.review", "kin.refresh"].map(
-        (id) => vscode.commands.registerCommand(id, guideToSetup)
-      )
+      ...[
+        "kin.search",
+        "kin.overview",
+        "kin.trace",
+        "kin.status",
+        "kin.review",
+        "kin.refresh",
+        "kin.openEntity",
+      ].map((id) => vscode.commands.registerCommand(id, guideToSetup))
     );
 
     void offerFirstRun(context, {
@@ -162,15 +182,19 @@ export function activate(context: vscode.ExtensionContext): void {
     manager.connectAll().then(() => {
       log("MCP connections established");
       // Refresh UI now that MCP is live
-      explorerProvider.refresh();
+      refreshTrees();
       statusBar?.update();
     });
 
-    // Auto-refresh the explorer whenever the daemon re-indexes the graph.
+    // Auto-refresh the trees whenever the daemon re-indexes the graph, and tell
+    // the editor every open kin:// document changed. Without the second half an
+    // open entity keeps showing the body it was opened with, which after a
+    // re-index is a body the graph no longer holds.
     context.subscriptions.push(
       manager.onGraphChanged(() => {
-        log("Graph changed — auto-refreshing entity explorer");
-        explorerProvider.refresh();
+        log("Graph changed — auto-refreshing the entity trees and open entity documents");
+        refreshTrees();
+        entityProvider?.invalidateAll();
         statusBar?.update();
       })
     );
@@ -180,11 +204,46 @@ export function activate(context: vscode.ExtensionContext): void {
   const primaryClient = manager.primaryClient()!;
   const primaryPath = manager.primaryWorkspacePath()!;
 
-  // Entity Explorer tree view
+  // Entity Explorer tree view. Both trees are registered and the kin.entityViewer
+  // setting's `when` clause decides which one the sidebar shows, so turning the
+  // viewer off puts the old explorer back with no reload and no second code path.
   const explorerProvider = new EntityExplorerProvider(primaryClient, primaryPath);
-  context.subscriptions.push(
-    vscode.window.registerTreeDataProvider("kinExplorer", explorerProvider)
+  const browserProvider = new GraphBrowserProvider(
+    primaryClient,
+    workspaceKeyFor(primaryPath)
   );
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider("kinExplorer", explorerProvider),
+    vscode.window.registerTreeDataProvider("kinGraph", browserProvider)
+  );
+
+  // The kin:// entity viewer. Registered only when the setting is on, so the
+  // scheme is genuinely inert rather than answering with a hidden feature.
+  const entityViewerEnabled = config.get<boolean>("entityViewer", true);
+  let entityProvider: KinEntityFileSystemProvider | undefined;
+  if (entityViewerEnabled) {
+    const diagnostics = new GraphDiagnostics();
+    entityProvider = new KinEntityFileSystemProvider(diagnostics);
+    entityProvider.setWorkspaces(viewerWorkspaces(manager));
+    context.subscriptions.push(
+      diagnostics,
+      entityProvider,
+      vscode.workspace.registerFileSystemProvider("kin", entityProvider, {
+        isCaseSensitive: true,
+        isReadonly: true,
+      }),
+      vscode.languages.registerHoverProvider(
+        { scheme: "kin" },
+        new KinEntityHoverProvider(entityProvider)
+      )
+    );
+    log("Entity viewer enabled: kin:// documents, graph browser and graph diagnostics");
+  }
+
+  const refreshTrees = () => {
+    explorerProvider.refresh();
+    browserProvider.refresh();
+  };
 
   // Status bar
   statusBar = new KinStatusBar(primaryClient);
@@ -228,7 +287,12 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
-    explorerProvider.refresh();
+    refreshTrees();
+    // The viewer serves documents out of whichever clients are live now. A
+    // folder that has been removed must stop answering rather than keep serving
+    // from a disposed client.
+    entityProvider?.setWorkspaces(viewerWorkspaces(manager!));
+    entityProvider?.invalidateAll();
     statusBar?.update();
     reviewProvider.onActiveEditorChanged(vscode.window.activeTextEditor);
   };
@@ -288,9 +352,22 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("kin.init", async () => {
       const built = await initGraph(folders);
       if (built) {
-        explorerProvider.refresh();
+        refreshTrees();
         statusBar?.update();
       }
+    }),
+
+    // The command id and the `registerCommand(` call stay on one line: the
+    // contributions guard reads the source for that exact pair, and a wrapped
+    // argument list is a registration it cannot see.
+    vscode.commands.registerCommand("kin.openEntity", async (target?: OpenEntityTarget) => {
+      if (!entityViewerEnabled) {
+        vscode.window.showInformationMessage(
+          "Kin entity documents are turned off. Switch on kin.entityViewer in settings to open entities from the graph."
+        );
+        return;
+      }
+      await openEntityDocument(manager!, target);
     }),
 
     vscode.commands.registerCommand("kin.status", async () => {
@@ -333,10 +410,121 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand("kin.refresh", () => {
-      explorerProvider.refresh();
+      refreshTrees();
+      entityProvider?.invalidateAll();
       statusBar?.update();
     })
   );
+}
+
+/** What `kin.openEntity` is handed when a graph browser row is clicked. */
+interface OpenEntityTarget {
+  entity: {
+    id?: string;
+    name: string;
+    kind: string;
+    language?: string;
+  };
+  workspaceKey: string;
+}
+
+/** The workspaces the entity viewer may serve, keyed the way a URI addresses them. */
+function viewerWorkspaces(manager: WorkspaceManager) {
+  return manager.allEntries().map((entry) => ({
+    key: workspaceKeyFor(entry.folder.uri.fsPath),
+    workspacePath: entry.folder.uri.fsPath,
+    client: entry.client,
+  }));
+}
+
+/**
+ * Open one entity as a `kin://` document.
+ *
+ * Invoked from a graph browser row with the entity it holds, and from the
+ * palette with nothing, where it asks the graph for candidates by name. The
+ * palette path goes through `search`, which is the semantic query, so a user
+ * who types what a function does reaches the entity without knowing its name.
+ */
+async function openEntityDocument(
+  manager: WorkspaceManager,
+  target?: OpenEntityTarget
+): Promise<void> {
+  let resolved = target;
+
+  if (!resolved) {
+    const active = await manager.resolveActiveClient();
+    if (!active) {
+      vscode.window.showWarningMessage(
+        "No Kin-initialized folder is open, so there is no graph to open an entity from."
+      );
+      return;
+    }
+    const query = await vscode.window.showInputBox({
+      prompt: "Open an entity from the Kin graph",
+      placeHolder: "Describe it, or type its name: e.g. 'retry logic', 'KinClient'",
+    });
+    if (!query) {
+      return;
+    }
+    let results;
+    try {
+      results = await active.client.search(query);
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `Kin could not search the graph: ${describeError(err)}`
+      );
+      return;
+    }
+    if (results.length === 0) {
+      vscode.window.showInformationMessage(
+        `Kin: the graph returned no entities for "${query}".`
+      );
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      results.map((entity) => ({
+        label: entity.name,
+        description: entity.kind,
+        detail: entity.signature,
+        entity,
+      })),
+      { placeHolder: `${results.length} entities for "${query}"`, matchOnDescription: true }
+    );
+    if (!picked) {
+      return;
+    }
+    resolved = {
+      entity: picked.entity,
+      workspaceKey: workspaceKeyFor(active.workspacePath),
+    };
+  }
+
+  if (!resolved.entity.id) {
+    // An entity with no graph id cannot be addressed, and the alternative is
+    // guessing one from its name. Say which answer was short rather than
+    // opening something that might be a different entity of the same name.
+    vscode.window.showWarningMessage(
+      `Kin returned no graph id for ${resolved.entity.name}, so it cannot be opened as a graph document. ` +
+        `Update the kin CLI, which publishes entity ids on its search answers.`
+    );
+    return;
+  }
+
+  const uri = entityUri({
+    workspaceKey: resolved.workspaceKey,
+    entityId: resolved.entity.id,
+    kind: resolved.entity.kind,
+    name: resolved.entity.name,
+    language: resolved.entity.language,
+  });
+  try {
+    const document = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(document, { preview: true });
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `Kin could not open ${resolved.entity.name}: ${describeError(err)}`
+    );
+  }
 }
 
 /**

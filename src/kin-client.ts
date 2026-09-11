@@ -20,11 +20,23 @@ import * as vscode from "vscode";
 import {
   BinaryNotFoundError,
   CliContractError,
+  GraphUnavailableError,
   TimeoutError,
   ParseError,
 } from "./errors";
 import { McpClient, McpToolError } from "./mcp-client";
 import { log, logError } from "./logger";
+import {
+  EntitySourceDocument,
+  readEntitySource,
+} from "./graph-entity";
+import {
+  GraphFinding,
+  dedupeFindings,
+  findingsFromGraphStatus,
+  findingsFromPayload,
+} from "./graph-findings";
+import { EntityNeighborhood, readNeighborhood } from "./graph-relations";
 import {
   ContractDrift,
   ContractNote,
@@ -47,6 +59,14 @@ export interface KinEntity {
   file: string;
   line: number;
   signature?: string;
+  /**
+   * The graph entity id, when the answer carried one. This is what a `kin://`
+   * document addresses; an entity without one can be listed but not opened as a
+   * graph document, because the alternative is guessing an id from a name.
+   */
+  id?: string;
+  /** The Kin language id, when the answer carried one. */
+  language?: string;
 }
 
 export interface KinStatus {
@@ -203,6 +223,22 @@ function asRecord(value: unknown): UnknownRecord {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as UnknownRecord)
     : {};
+}
+
+/**
+ * Parse a tool response for its disclosures only.
+ *
+ * Returning `undefined` on unparseable text is right HERE and wrong for a
+ * payload read: the caller is asking what the daemon disclosed about an answer
+ * it has already read, so a response with no readable envelope simply discloses
+ * nothing. The body read alongside it does its own strict parse and throws.
+ */
+function safeParse(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
 }
 
 const QUICK_TRACE_CACHE_TTL_MS = 5_000;
@@ -772,6 +808,105 @@ export class KinClient {
         ),
       30_000
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Entity viewer reads (graph-only, no CLI fallback)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * One entity's body and metadata from graph-owned truth.
+   *
+   * MCP only, and deliberately so. Every other read on this client has a CLI
+   * compatibility path because the CLI answers the same question from the same
+   * graph; this one has none because there is nothing to fall back TO that
+   * would still be a graph answer. The umbrella's zero-file-search rule puts a
+   * raw file read outside every runtime answer path, and a viewer that quietly
+   * opened the file when the daemon was down would look exactly like a working
+   * viewer while showing something the graph never served.
+   *
+   * The body arrives exactly as the span holds it. On kin `origin/main` at
+   * 8021c785b, `get_entity_source` reads the exact span and REFUSES a body over
+   * its byte limit with a message naming `kin_artifact_read`, rather than
+   * clipping one; the 40-line / 2400-character clip with the
+   * `... [truncated]` marker belongs to `get_context_pack.focal_entity.body`
+   * and `get_entity`'s `source_excerpt`. The caller still checks for the marker,
+   * because which tool clips is the daemon's decision to change and a silently
+   * cut body presented as an entity's source is the failure worth guarding.
+   */
+  async entitySource(
+    entityId: string
+  ): Promise<{ document: EntitySourceDocument; findings: GraphFinding[] }> {
+    const raw = await this.callGraphTool("get_entity_source", {
+      entity_id: entityId,
+    });
+    return {
+      document: readEntitySource(raw),
+      findings: findingsFromPayload(safeParse(raw)),
+    };
+  }
+
+  /**
+   * One entity's immediate relations, at depth 1 in both directions.
+   *
+   * Depth 1 on purpose: the viewer shows what this entity is connected to, and
+   * a deeper walk would put entities two hops away in a list a reader reads as
+   * "this entity's relations".
+   */
+  async entityRelations(
+    entityId: string,
+    limit = 60
+  ): Promise<{ neighborhood: EntityNeighborhood; findings: GraphFinding[] }> {
+    const raw = await this.callGraphTool("graph_neighborhood", {
+      entity_id: entityId,
+      depth: 1,
+      direction: "both",
+      limit,
+    });
+    return {
+      neighborhood: readNeighborhood(raw),
+      findings: findingsFromPayload(safeParse(raw)),
+    };
+  }
+
+  /**
+   * What `kin_graph_status` discloses about the graph serving this workspace.
+   *
+   * Read beside an entity rather than on its own, because the facts it carries
+   * (enrichment is unattested, embeddings still pending, vectors the graph no
+   * longer admits) qualify every answer about every entity, and the place a
+   * reader will actually see them is the document they are looking at.
+   */
+  async graphStatusFindings(): Promise<GraphFinding[]> {
+    const raw = await this.callGraphTool("kin_graph_status", {});
+    return findingsFromGraphStatus(safeParse(raw));
+  }
+
+  /** Merge finding lists from several reads into one deduped set. */
+  static mergeFindings(
+    ...lists: readonly (readonly GraphFinding[])[]
+  ): GraphFinding[] {
+    return dedupeFindings(...lists);
+  }
+
+  /**
+   * Call one graph tool over MCP, refusing rather than degrading.
+   *
+   * The warming retry is kept, because a cold daemon is not a missing graph and
+   * the server asks to be retried. Everything else raises.
+   */
+  private async callGraphTool(
+    toolName: string,
+    args: Record<string, unknown>
+  ): Promise<string> {
+    if (!this.isMcpConnected()) {
+      throw new GraphUnavailableError(
+        this.mcpClient
+          ? "the MCP connection to the Kin daemon is not live."
+          : "the MCP graph path is switched off by kin.mcpEnabled."
+      );
+    }
+    return this.callToolWarm(toolName, args, this.queryTimeoutMs());
   }
 
   async renamePlan(

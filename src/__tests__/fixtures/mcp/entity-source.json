@@ -1,0 +1,37 @@
+{
+  "capture": {
+    "tool": "get_entity_source",
+    "arguments": { "entity_id": "<entity id>" },
+    "provenance": "CONSTRUCTED from kin source, not captured from a running daemon. Every key below is taken from the response builder on kin origin/main at 8021c785b: crates/kin-mcp/src/handlers/entities.rs `handle_get_entity_source` builds id, name, kind, language, file_path, read_path, start_line, end_line, signature, body and source, then extends the object with crates/kin-mcp/src/handlers/common.rs `source_provenance_fields`, which adds source_state, span_coherence, artifact_id, artifact_entry and either source_change_id (committed) or workspace_tree_hash + workspace_generation + base_change_id (uncommitted). crates/kin-mcp/src/envelope.rs `annotate_block` then merges the `_kin` envelope into the same object under the reserved key. This lane did not run a daemon, so this is a shape fixture and NOT evidence about any daemon's behaviour.",
+    "shape": "committed body, clean envelope"
+  },
+  "payload": {
+    "id": "6b1d5f2a-6d3c-4c6a-9a1f-0a2f5c4b7e10",
+    "name": "KinClient::entitySource",
+    "kind": "Method",
+    "language": "rust",
+    "file_path": "src/kin-client.rs",
+    "read_path": "src/kin-client.rs",
+    "start_line": 412,
+    "end_line": 418,
+    "signature": "pub async fn entity_source(&self, entity_id: &str) -> Result<EntitySource>",
+    "body": "pub async fn entity_source(&self, entity_id: &str) -> Result<EntitySource> {\n    let raw = self.call_graph_tool(\"get_entity_source\", entity_id).await?;\n    Ok(read_entity_source(&raw)?)\n}",
+    "source": "graph",
+    "source_state": "committed",
+    "source_change_id": "9f2c1b77-3a4e-4c19-8f25-6f1b0d3a8c42",
+    "span_coherence": "proven",
+    "artifact_id": "b1946ac92492d2347c6235b4d2611184",
+    "artifact_entry": { "mode": "blob", "size": 4096 },
+    "_kin": {
+      "envelope_version": 1,
+      "runtime": "repo-daemon",
+      "degraded": {},
+      "semantic_coverage": {
+        "indexed": 730,
+        "total": 730,
+        "pending": 0,
+        "complete": true
+      }
+    }
+  }
+}
