@@ -105,6 +105,20 @@ export class KinEntityFileSystemProvider
   }
 
   /**
+   * Forget a closed entity document.
+   *
+   * Diagnostics live until something removes them, and a user browsing the
+   * graph opens a lot of entities. Without this the Problems panel keeps every
+   * entity ever opened until the window reloads, which buries the findings for
+   * the entity actually in front of them.
+   */
+  forget(uri: vscode.Uri): void {
+    if (this.views.delete(uri.toString())) {
+      this.diagnostics.clear(uri);
+    }
+  }
+
+  /**
    * Tell the editor every open entity document changed.
    *
    * Called when the daemon says the graph changed. `stat` answers with a fresh

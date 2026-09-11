@@ -363,6 +363,35 @@ describe("invalidating open entity documents", () => {
     expect(client.entitySource).toHaveBeenCalledTimes(2);
   });
 
+  it("clears a closed document's diagnostics instead of keeping them forever", async () => {
+    const client = makeClient({
+      graphStatusFindings: jest.fn().mockResolvedValue([
+        {
+          code: "graph_status.completion_unattested",
+          severity: "info" as const,
+          message: "no attestation",
+        },
+      ]),
+    });
+    const { provider, collection } = makeProvider(client);
+
+    await provider.readFile(uri());
+    expect(collection.set).toHaveBeenCalledTimes(1);
+
+    provider.forget(uri());
+
+    // A user browsing the graph opens a lot of entities, and findings that
+    // outlive their document bury the ones for the entity in front of them.
+    expect(collection.delete).toHaveBeenCalledTimes(1);
+    expect(provider.viewFor(uri())).toBeUndefined();
+  });
+
+  it("does not clear diagnostics for a document it never served", () => {
+    const { provider, collection } = makeProvider(makeClient());
+    provider.forget(uri());
+    expect(collection.delete).not.toHaveBeenCalled();
+  });
+
   it("fires nothing when no entity document is open", () => {
     const { provider } = makeProvider(makeClient());
     const changed: unknown[] = [];
