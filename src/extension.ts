@@ -235,7 +235,12 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.languages.registerHoverProvider(
         { scheme: "kin" },
         new KinEntityHoverProvider(entityProvider)
-      )
+      ),
+      vscode.workspace.onDidCloseTextDocument((document) => {
+        if (document.uri.scheme === "kin") {
+          entityProvider?.forget(document.uri);
+        }
+      })
     );
     log("Entity viewer enabled: kin:// documents, graph browser and graph diagnostics");
   }
