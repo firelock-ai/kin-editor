@@ -29,7 +29,7 @@ jobs:
   release:
     needs: validate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     environment: marketplace-publish
     permissions:
       contents: write
@@ -56,14 +56,33 @@ jobs:
 
           const version = process.env.RELEASE_VERSION.replace(/^v/, "");
           const packagePath = `kin-${version}.vsix`;
+          // vsce's own retry-with-backoff (cockatiel) only wraps the signed-package
+          // path, which this workflow never takes, so a plain publishVSIX() call has
+          // no retry at all against a gallery timeout. Bound it here instead: three
+          // attempts, short backoff, each attempt's outcome logged.
+          const maxAttempts = 3;
+          const backoffMs = [15000, 30000];
 
-          await publishVSIX(packagePath, {
-            pat: process.env.VSCE_TOKEN,
-            preRelease: version.includes("-"),
-            skipDuplicate: true,
-          });
-
-          console.log(`Published ${packagePath} to Visual Studio Marketplace`);
+          for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+              await publishVSIX(packagePath, {
+                pat: process.env.VSCE_TOKEN,
+                preRelease: version.includes("-"),
+                skipDuplicate: true,
+              });
+              console.log(`Published ${packagePath} to Visual Studio Marketplace (attempt ${attempt}/${maxAttempts})`);
+              break;
+            } catch (err) {
+              console.log(`Marketplace publish attempt ${attempt}/${maxAttempts} failed: ${err.message}`);
+              if (attempt === maxAttempts) {
+                console.log(`::error::Marketplace publish of ${packagePath} exhausted ${maxAttempts} attempts`);
+                throw err;
+              }
+              const waitMs = backoffMs[attempt - 1];
+              console.log(`Retrying in ${waitMs / 1000}s...`);
+              await new Promise((resolve) => setTimeout(resolve, waitMs));
+            }
+          }
           NODE
 
       - name: Verify exact Visual Studio Marketplace version
@@ -93,8 +112,33 @@ jobs:
           set -euo pipefail
           : "${OVSX_TOKEN:?OVSX_TOKEN is required for a release}"
           version="${RELEASE_VERSION#v}"
-          npx --yes ovsx publish "kin-${version}.vsix" -p "$OVSX_TOKEN" --skip-duplicate
-          echo "Published kin-${version}.vsix to Open VSX"
+          package="kin-${version}.vsix"
+          # ovsx carries no retry or timeout handling of its own, so bound each
+          # attempt explicitly and retry the same three-attempt, logged shape used
+          # for the Marketplace publish above.
+          max_attempts=3
+          backoffs=(15 30)
+          attempt=1
+          while [ "$attempt" -le "$max_attempts" ]; do
+            echo "Open VSX publish attempt ${attempt}/${max_attempts}..."
+            set +e
+            timeout 180 npx --yes ovsx publish "$package" -p "$OVSX_TOKEN" --skip-duplicate
+            rc=$?
+            set -e
+            if [ "$rc" -eq 0 ]; then
+              echo "Published ${package} to Open VSX (attempt ${attempt}/${max_attempts})"
+              exit 0
+            fi
+            echo "Open VSX publish attempt ${attempt}/${max_attempts} failed (exit ${rc})"
+            if [ "$attempt" -eq "$max_attempts" ]; then
+              echo "::error::Open VSX publish of ${package} exhausted ${max_attempts} attempts"
+              exit 1
+            fi
+            wait_s="${backoffs[$((attempt - 1))]}"
+            echo "Retrying in ${wait_s}s..."
+            sleep "$wait_s"
+            attempt=$((attempt + 1))
+          done
 
       - name: Verify exact Open VSX version
         env:
