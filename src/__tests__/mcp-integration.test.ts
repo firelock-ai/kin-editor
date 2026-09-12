@@ -18,6 +18,7 @@
 import { mkdtempSync, realpathSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import type { ChildProcess } from "child_process";
 
 jest.mock(
   "vscode",
@@ -306,6 +307,32 @@ describe("MCP live integration (real subprocess, real stdio transport)", () => {
     expect(client.isConnected()).toBe(true);
     await expect(client.callTool("__crash__", {})).rejects.toThrow();
     expect(client.isConnected()).toBe(false);
+  });
+
+  it("closes the owned server stdin when process signaling is denied", async () => {
+    const client = await connectClient(makeWorkspace());
+    const child = (client as unknown as { process: ChildProcess }).process;
+    const signal = jest.spyOn(child, "kill").mockImplementation(() => {
+      throw Object.assign(new Error("Operation not permitted"), { code: "EPERM" });
+    });
+    const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      client.dispose();
+      const code = await Promise.race([
+        exited,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("Owned MCP server did not exit on EOF")), 2_000);
+        }),
+      ]);
+      expect(code).toBe(0);
+      expect(signal).toHaveBeenCalledWith("SIGTERM");
+      expect(client.isConnected()).toBe(false);
+    } finally {
+      clearTimeout(timeout);
+      child.stdin?.end();
+      signal.mockRestore();
+    }
   });
 
   it("reconnects to the intended workspace after a manual reconnect", async () => {
