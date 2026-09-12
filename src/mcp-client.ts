@@ -250,6 +250,13 @@ export class McpClient implements vscode.Disposable {
   private killProcess(): void {
     if (this.process) {
       try {
+        // Closing our pipe lets a stdio server exit on EOF even when process
+        // signaling is unavailable in the host environment.
+        this.process.stdin?.end();
+      } catch {
+        // The pipe may already be closed.
+      }
+      try {
         this.process.kill("SIGTERM");
       } catch {
         // Process may already be dead
