@@ -2,6 +2,12 @@
 
 All notable changes to the Kin VS Code extension are documented in this file.
 
+## [0.1.13] - 2026-09-12
+
+### Changed
+
+- Update kin-editor source (#115)
+
 ## [0.1.12] - 2026-09-11
 
 ### Changed
