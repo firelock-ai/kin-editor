@@ -2,6 +2,12 @@
 
 All notable changes to the Kin VS Code extension are documented in this file.
 
+## [0.1.14] - 2026-09-22
+
+### Changed
+
+- test(symbols): cover workspace symbol provider (#114)
+
 ## [0.1.13] - 2026-09-12
 
 ### Changed
