@@ -17,7 +17,8 @@ export interface WorkspaceEntry {
 export class WorkspaceManager implements vscode.Disposable {
   private entries: Map<string, WorkspaceEntry> = new Map();
   private readonly mcpEnabled: boolean;
-  private readonly mcpSubscriptions: vscode.Disposable[] = [];
+  private readonly mcpSubscriptions = new Map<McpClient, vscode.Disposable>();
+  private readonly connections = new Map<McpClient, Promise<void>>();
 
   /**
    * Fires whenever any Kin workspace's daemon signals a graph change.
@@ -54,7 +55,6 @@ export class WorkspaceManager implements vscode.Disposable {
 
       if (!existsSync(kinDir)) {
         if (existing) {
-          existing.mcpClient?.dispose();
           changed = true;
         }
         continue;
@@ -77,7 +77,7 @@ export class WorkspaceManager implements vscode.Disposable {
 
     for (const [folderPath, entry] of this.entries.entries()) {
       if (!nextEntries.has(folderPath)) {
-        entry.mcpClient?.dispose();
+        if (entry.mcpClient) this.disposeClient(entry.mcpClient);
         changed = true;
       }
     }
@@ -86,22 +86,34 @@ export class WorkspaceManager implements vscode.Disposable {
     return changed;
   }
 
-  /** Connect all MCP clients. Call after construction. */
+  /** Connect newly introduced clients once; existing clients own reconnects. */
   async connectAll(): Promise<void> {
     const promises: Promise<void>[] = [];
     for (const entry of this.entries.values()) {
       if (entry.mcpClient) {
-        promises.push(entry.mcpClient.connect());
+        const client = entry.mcpClient;
+        const existing = this.connections.get(client);
+        if (existing) { promises.push(existing); continue; }
         // Bubble graph-change notifications up so the explorer auto-refreshes.
-        this.mcpSubscriptions.push(
-          entry.mcpClient.onGraphChanged(() => {
+        this.mcpSubscriptions.set(client,
+          client.onGraphChanged(() => {
             log(`WorkspaceManager: graph changed in ${entry.folder.name} — firing refresh`);
             this._onGraphChanged.fire();
           })
         );
+        const connection = client.connect();
+        this.connections.set(client, connection);
+        promises.push(connection);
       }
     }
     await Promise.allSettled(promises);
+  }
+
+  private disposeClient(client: McpClient): void {
+    this.mcpSubscriptions.get(client)?.dispose();
+    this.mcpSubscriptions.delete(client);
+    this.connections.delete(client);
+    client.dispose();
   }
 
   get size(): number {
@@ -178,14 +190,10 @@ export class WorkspaceManager implements vscode.Disposable {
   }
 
   dispose(): void {
-    for (const sub of this.mcpSubscriptions) {
-      sub.dispose();
-    }
-    this.mcpSubscriptions.length = 0;
     this._onGraphChanged.dispose();
     for (const entry of this.entries.values()) {
       if (entry.mcpClient) {
-        entry.mcpClient.dispose();
+        this.disposeClient(entry.mcpClient);
       }
     }
     this.entries.clear();

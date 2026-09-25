@@ -4,9 +4,7 @@
 
 # Kin for Visual Studio Code
 
-> **AI changed who writes code.**
->
-> Kin changes what they build on.
+> **A new foundation for code.** Kin is a graph-native code repository for people and AI agents.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Part of Kin](https://img.shields.io/badge/part%20of-Kin-6E56CF.svg)](https://github.com/firelock-ai/kin)
@@ -102,7 +100,9 @@ active path as MCP or CLI, and the extension never searches files on its own.
   is grouped under a row that says so instead of being filed under a directory.
 - **Entity documents** (`kin://`): open an entity and read its body as the graph
   serves it, with its kind and name in the tab and its signature, provenance and
-  relations in the hover. Read-only for now, and the refusal to save says why.
+  relations in the hover. **Edit Entity** opens a separate durable draft. **Save**
+  preserves exact draft text, including empty or temporarily invalid code;
+  **Apply Saved Draft** explicitly publishes a saved revision through Kin.
   Nothing here reads a file: when the graph cannot answer, the viewer says which
   part could not rather than showing bytes the graph never served.
 - **Graph diagnostics:** what the daemon disclosed about the answer, on the
@@ -132,6 +132,38 @@ active path as MCP or CLI, and the extension never searches files on its own.
   before selecting its Kin client. The entity explorer and the status bar follow
   the first Kin-initialized folder in the workspace.
 
+## Editing and recovering entity drafts
+
+Open an entity in the Graph Browser and run **Kin: Edit Entity**. The daemon
+saves the original source and editing base, then opens an editable `kin://` draft.
+Save writes durable editing state; it does not change published repository source.
+The draft status bar distinguishes unsaved text, saved text and an Apply receipt.
+
+Run **Kin: Apply Saved Draft** after saving. Kin checks the original source base
+under its publication lock. A stale or invalid draft stays saved; use **Compare
+Draft with Current Source**, then **New Draft from Current Source** to choose the
+changes to carry into a fresh draft. The new draft starts with current source;
+copy only the changes you want. Old drafts and pending requests remain retained.
+
+A timeout may hide a successful Save or Apply. Retry the same operation: the
+editor retains its exact invocation before dispatch. **Resume Interrupted Apply**
+re-registers the original session when a daemon restart expired it. A recovered
+receipt names its applied revision; newer saved text may still be unapplied, and
+an old receipt does not certify the repository's present contents.
+
+**Open Saved Draft** lists retained drafts, including those whose entity no longer
+exists. **Recover Saved Draft Revision** reads an explicit earlier revision even
+when the latest record is corrupt. Recovery revisions are read-only. Source
+refreshes never overwrite draft tabs, and published graph diagnostics are not
+shown as diagnostics for unfinished draft text. If another editor saved first,
+the revision conflict preserves your buffer; compare and choose a fresh draft.
+
+Draft editing requires an authenticated local daemon with durable draft support.
+An old daemon, unsupported storage, or a truncated/historical source read keeps
+the document readable without offering a Save guarantee. The daemon reports its
+storage limits; raising a configured limit and restarting permits the same
+refused request to be retried. No prior draft is evicted to make room.
+
 ## Runtime behavior and settings
 
 With `kin.mcpEnabled` at its default, the extension launches `kin mcp start` on
@@ -160,6 +192,29 @@ reports an unreachable daemon as an uninitialized repository.
 The extension requires the local Kin CLI and daemon. It does not require a
 hosted KinLab login, and it does not make the still-upcoming hosted repository
 connection flow available early.
+
+When initialization admits a repository but reports an enrichment or reopening
+caveat, the editor keeps that warning visible and offers to reload into the
+admitted graph. The Kin output channel retains the CLI's explanation and recovery
+guidance. A failed or interrupted admission does not activate the graph.
+
+## Maintaining diagnostic compatibility
+
+The editor translates MCP envelope v2 codes using the public Kin clause registry
+copied into `src/diagnostic-codes.json`. It preserves older sentence payloads and
+explicitly identifies unknown codes or versions. Builds and packaged extensions
+use that checked-in copy and require no adjacent repository.
+
+After reviewing an upstream envelope change, refresh from its Kin checkout:
+
+```sh
+node scripts/sync-diagnostic-codes.mjs /path/to/kin
+node scripts/sync-diagnostic-codes.mjs /path/to/kin --check
+```
+
+The refresh refuses unsupported versions and partial registries. Review any new
+coverage-limit labels in `src/graph-findings.ts` and run the diagnostic and full
+editor tests before updating the supported contract.
 
 ## Ecosystem
 

@@ -1,0 +1,12 @@
+{
+  "name": "kin-editor-runtime-check-host",
+  "displayName": "Kin editor runtime check host",
+  "description": "Carries the runtime check into the extension host. It contributes nothing; the extension under test is the installed VSIX.",
+  "publisher": "kin-runtime-check",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  }
+}

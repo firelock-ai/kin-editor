@@ -9,6 +9,23 @@ import {
 } from "../graph-uri";
 
 describe("the kin:// URI shape", () => {
+  const draftId = "11111111-1111-4111-8111-111111111111";
+
+  it.each(["revision=", "revision", "revision=1&revision=2", "revision=&revision=2", "revision=0", "revision=-1", "revision=9007199254740992"])("refuses a malformed recovery selector without resolving latest: %s", selector => {
+    expect(parseEntityUriParts({ authority: "workspace", path: "/Function/value.rs", query: `id=entity&draft=${draftId}&${selector}` })).toBeUndefined();
+  });
+
+  it.each(["draft=", "draft", `draft=${draftId}&draft=${draftId}`, "revision=1", "id=other"])("refuses ambiguous or unbound document identity: %s", selector => {
+    expect(parseEntityUriParts({ authority: "workspace", path: "/Function/value.rs", query: `id=entity&${selector}` })).toBeUndefined();
+  });
+
+  it("distinguishes a latest draft from an explicit earlier revision", () => {
+    const parts = { authority: "workspace", path: "/Function/value.rs", query: `id=entity&draft=${draftId}` };
+    expect(parseEntityUriParts(parts)).toMatchObject({ draftId });
+    expect(parseEntityUriParts(parts)?.draftRevision).toBeUndefined();
+    expect(parseEntityUriParts({ ...parts, query: parts.query + "&revision=2" })).toMatchObject({ draftId, draftRevision: 2 });
+  });
+
   it("addresses an entity by its graph id and shows its kind and name", () => {
     const parts = buildEntityUriParts({
       workspaceKey: "abc123",

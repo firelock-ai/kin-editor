@@ -16,6 +16,7 @@ import { execFile } from "child_process";
 import { existsSync } from "fs";
 import { homedir } from "os";
 import { isAbsolute, join, relative, sep } from "path";
+import { isDeepStrictEqual } from "util";
 import * as vscode from "vscode";
 import {
   BinaryNotFoundError,
@@ -37,6 +38,15 @@ import {
   findingsFromPayload,
 } from "./graph-findings";
 import { EntityNeighborhood, readNeighborhood } from "./graph-relations";
+import {
+  EntityDraft, DraftCreate, DraftSave, DraftApply, DraftApplied, DraftCapabilities,
+  DraftList, DraftListing, DraftToolError, draftAssert, draftUuid, draftJson,
+  parseEntityDraft, parseDraftSaved, parseDraftApplied, parseDraftCapabilities,
+  parseDraftListing, validateDraftCreate, validateDraftSave, validateDraftApply,
+  validateDraftRead, validateDraftList, validateDraftSession, isMissingDraftSession,
+  findAppliedDraftAttempt, bindAppliedDraftReceipt,
+  splitDraftMcpPayload,
+} from "./entity-draft-contract";
 import {
   ContractDrift,
   ContractNote,
@@ -844,6 +854,95 @@ export class KinClient {
       document: readEntitySource(raw),
       findings: findingsFromPayload(safeParse(raw)),
     };
+  }
+
+  /** Durable draft operations have no CLI or filesystem write fallback. */
+  private async draftTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+    try {
+      const response = splitDraftMcpPayload(draftJson(await this.callGraphTool(name, args)));
+      draftAssert(response.envelope?.runtime !== "offline-in-process", "durable drafts require the repository daemon");
+      return response.payload;
+    }
+    catch (error) {
+      if (error instanceof McpToolError) throw new DraftToolError(name, error.text);
+      throw error;
+    }
+  }
+
+  async createDraft(request: DraftCreate): Promise<EntityDraft> {
+    validateDraftCreate(request);
+    const draft = parseDraftSaved(await this.draftTool("kin_draft_create", { ...request }));
+    draftAssert(draft.draft_id === request.draft_id && draft.revision === 1 && draft.body === request.body &&
+      draft.original_body === request.original_body && isDeepStrictEqual(draft.original_source_base, request.original_source_base),
+      "Save acknowledgement differs from the exact Create request");
+    return draft;
+  }
+
+  async saveDraft(request: DraftSave): Promise<EntityDraft> {
+    validateDraftSave(request);
+    const draft = parseDraftSaved(await this.draftTool("kin_draft_save", { ...request }));
+    draftAssert(draft.draft_id === request.draft_id && draft.revision === request.expected_revision + 1 &&
+      draft.content_revision === draft.revision && draft.body === request.body,
+      "Save acknowledgement differs from the exact revision and text submitted");
+    return draft;
+  }
+
+  async readDraft(draftId: string, revision?: number): Promise<EntityDraft> {
+    validateDraftRead(draftId, revision);
+    const draft = parseEntityDraft(await this.draftTool("kin_draft_read", {
+      draft_id: draftId, ...(revision === undefined ? {} : { revision }),
+    }));
+    draftAssert(draft.draft_id === draftId && (revision === undefined || draft.revision === revision),
+      "draft read returned another identity or revision");
+    return draft;
+  }
+
+  async applyDraft(request: DraftApply): Promise<DraftApplied> {
+    validateDraftApply(request);
+    const result = parseDraftApplied(await this.draftTool("kin_draft_apply", { ...request }));
+    // A pending original attempt can finish after newer text was saved. Its
+    // actual applied revision, rather than the newest body, is the receipt.
+    draftAssert(result.draft_id === request.draft_id && result.requested_revision <= request.expected_revision,
+      "Apply answered another draft or a later invocation");
+    let original = findAppliedDraftAttempt(result, result.draft);
+    if (!original) {
+      draftAssert(result.requested_revision < Number.MAX_SAFE_INTEGER, "original attempt revision cannot be represented exactly");
+      const historical = await this.readDraft(request.draft_id, result.requested_revision + 1);
+      original = findAppliedDraftAttempt(result, historical);
+    }
+    draftAssert(original, "Apply receipt has no matching immutable attempt");
+    bindAppliedDraftReceipt(result, original);
+    return result;
+  }
+
+  async draftCapabilities(): Promise<DraftCapabilities> {
+    return parseDraftCapabilities(await this.draftTool("kin_draft_capabilities", {}));
+  }
+
+  async listDrafts(request: DraftList = {}): Promise<DraftListing> {
+    validateDraftList(request);
+    return parseDraftListing(await this.draftTool("kin_draft_list", { ...request }), request);
+  }
+
+  /** Preserve a caller's UUID; no replacement session may own its retry. */
+  async registerDraftSession(sessionId: string): Promise<void> {
+    draftUuid(sessionId, "session_id");
+    try {
+      const heartbeat = await this.draftTool("kin_session_heartbeat", { session_id: sessionId });
+      validateDraftSession(heartbeat, sessionId, false);
+      return;
+    } catch (error) {
+      if (!isMissingDraftSession(error, sessionId)) throw error;
+    }
+    const registered = await this.draftTool("kin_session_start", {
+      session_id: sessionId, vendor: "kin-editor", client_name: "Kin Editor",
+      transport: "mcp", cwd: this.workspacePath,
+      capabilities: {
+        can_read: true, can_write: true, can_execute: false, can_branch: false,
+        can_commit: true, max_concurrent_intents: 1,
+      },
+    });
+    validateDraftSession(registered, sessionId, true);
   }
 
   /**

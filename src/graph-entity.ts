@@ -8,6 +8,7 @@
 import type { KinEntity } from "./kin-client";
 import type { GraphFinding } from "./graph-findings";
 import type { EntityNeighborhood } from "./graph-relations";
+import { EntitySourceBase, parseSourceBase, draftAssert } from "./entity-draft-contract";
 
 /**
  * The marker `kin` writes where it clipped a rendered body.
@@ -59,6 +60,10 @@ export interface EntitySourceDocument {
   /** True when the body carries the daemon's own truncation marker. */
   truncated: boolean;
   provenance: EntityProvenance;
+  /** Exact original read expectation, absent on historical/unverified sources. */
+  sourceBase?: EntitySourceBase;
+  /** Body remains readable when a daemon's editing expectation is unsupported. */
+  sourceBaseRefusal?: string;
 }
 
 /**
@@ -145,6 +150,16 @@ export function readEntitySource(raw: string): EntitySourceDocument {
   }
 
   const body = parsed.body as string;
+  let sourceBase: EntitySourceBase | undefined;
+  let sourceBaseRefusal: string | undefined;
+  if (parsed.source_base != null) {
+    try { sourceBase = parseSourceBase(parsed.source_base); }
+    catch (error) { sourceBaseRefusal = error instanceof Error ? error.message : String(error); }
+  }
+  if (sourceBase) {
+    draftAssert(sourceBase.entity_id === parsed.id, "source_base names another entity");
+    draftAssert(Buffer.byteLength(body) === sourceBase.end_byte - sourceBase.start_byte, "source body length differs from source_base");
+  }
   return {
     entityId: optionalString(parsed.id) ?? "",
     name: parsed.name as string,
@@ -154,6 +169,8 @@ export function readEntitySource(raw: string): EntitySourceDocument {
     startLine: optionalNumber(parsed.start_line),
     endLine: optionalNumber(parsed.end_line),
     body,
+    sourceBase,
+    sourceBaseRefusal,
     truncated: isTruncatedBody(body),
     provenance: {
       sourceState: optionalString(parsed.source_state),
@@ -283,7 +300,7 @@ export function groupByNamespaceAndKind(
   entities: readonly KinEntity[]
 ): NamespaceGroup[] {
   const byNamespace = new Map<string, Map<string, KinEntity[]>>();
-  const UNNAMESPACED = " ";
+  const UNNAMESPACED = "\u0000";
 
   for (const entity of entities) {
     const namespace = namespaceOf(entity.name) ?? UNNAMESPACED;

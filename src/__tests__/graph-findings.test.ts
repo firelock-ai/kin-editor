@@ -113,7 +113,7 @@ describe("findings from a tool response", () => {
       },
     });
     expect(codes(findings)).toEqual(["completeness.partial"]);
-    expect(findings[0].message).toContain("at_least");
+    expect(findings[0].message).toContain("lower bound");
     expect(findings[0].message).toContain("vector index was empty");
   });
 

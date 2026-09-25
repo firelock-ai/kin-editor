@@ -1,21 +1,14 @@
 // Copyright 2026 Firelock LLC
 // SPDX-License-Identifier: Apache-2.0
 
-// The `kin://` entity viewer: a read-only FileSystemProvider that opens a graph
-// entity as a document.
-//
-// The document's bytes are the entity's body as the graph served it, and
-// nothing else. No file is opened, no span is re-derived from disk, and when
-// the graph cannot answer the viewer refuses and says which part could not,
-// because a viewer that silently read the file would be indistinguishable from
-// a working one while showing something graph truth never served.
-//
-// Writing is refused by the provider, not merely hidden by the UI. The founder's
-// ruling of 2026-09-11 is viewer plus diagnostics first and the `kin://` write
-// path after the entity-shaped write tool exists, so the refusal names that
-// rather than pretending the surface is inherently read-only.
+// Graph source and durable draft documents share a scheme but have distinct
+// identities. Source reads never fall back to files; Save preserves a draft,
+// and only explicit Apply publishes through the daemon's guarded mutation.
 
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
+import { isDeepStrictEqual, TextDecoder } from "util";
+import { createEntityDraft, DraftJournal, EntityDraftSession } from "./entity-draft-session";
+import type { EntityDraft, DraftApplied } from "./entity-draft-contract";
 import * as vscode from "vscode";
 import { KinClient } from "./kin-client";
 import {
@@ -67,16 +60,19 @@ export function entityUri(locator: EntityLocator): vscode.Uri {
   });
 }
 
-/**
- * The sentence every write path answers with.
- *
- * One constant because a user who tries to save, rename and delete should read
- * the same reason three times rather than three different guesses at it.
- */
 export const WRITE_PATH_REFUSAL =
-  "Kin entity documents are read-only for now. Editing one has to go through an entity-shaped write to the " +
-  "graph, which projects the new body back into the working file; that tool is being built and the viewer " +
-  "will accept saves once it exists. Edit the projected file in the meantime.";
+  "This is a source or recovery view. Use Kin: Edit Entity to create a durable draft. " +
+  "Save preserves draft text; Kin: Apply Saved Draft publishes it. Rename and delete are unavailable here.";
+
+/** A draft UUID remains addressable even when its graph entity was deleted. */
+export function draftUri(source: vscode.Uri, draftId: string, revision?: number): vscode.Uri {
+  const address = parseEntityUriParts(source);
+  if (!address) throw vscode.FileSystemError.FileNotFound(source);
+  return vscode.Uri.from({
+    scheme: KIN_SCHEME, authority: source.authority, path: source.path,
+    query: `id=${encodeURIComponent(address.entityId)}&draft=${draftId}${revision === undefined ? "" : `&revision=${revision}`}`,
+  });
+}
 
 export class KinEntityFileSystemProvider
   implements vscode.FileSystemProvider, vscode.Disposable
@@ -89,15 +85,42 @@ export class KinEntityFileSystemProvider
   private readonly workspaces = new Map<string, ViewerWorkspace>();
   private readonly views = new Map<string, EntityView>();
 
-  constructor(private readonly diagnostics: GraphDiagnostics) {}
+  private readonly sessions = new Map<string, EntityDraftSession>();
+  private readonly writable = new Set<string>();
+  private readonly reads = new Map<string, Promise<EntityView>>();
+  private readonly workspaceEpochs = new Map<string, object>();
+  private readonly documentEpochs = new Map<string, object>();
+  private readonly bindings = new Map<string, object>();
+  private readonly retainedDrafts = new Map<string, EntityDraft>();
+
+  constructor(
+    private readonly diagnostics: GraphDiagnostics,
+    private readonly journal?: DraftJournal,
+  ) {}
 
   /** Register the workspaces whose graphs this provider may serve. */
   setWorkspaces(workspaces: readonly ViewerWorkspace[]): void {
+    const next = new Map(workspaces.map(workspace => [workspace.key, workspace]));
+    for (const [key, prior] of this.workspaces) {
+      const current = next.get(key);
+      if (current?.client === prior.client && current.workspacePath === prior.workspacePath) continue;
+      this.workspaceEpochs.delete(key);
+      for (const document of new Set([...this.views.keys(), ...this.reads.keys()])) {
+        if (vscode.Uri.parse(document).authority !== key) continue;
+        this.reads.delete(document);
+        this.writable.delete(document);
+        this.bindings.delete(document);
+        if (!this.retainedDrafts.has(document)) this.views.delete(document);
+      }
+    }
     this.workspaces.clear();
     for (const workspace of workspaces) {
       this.workspaces.set(workspace.key, workspace);
+      if (!this.workspaceEpochs.has(workspace.key)) this.workspaceEpochs.set(workspace.key, {});
     }
   }
+
+  availableWorkspaces(): readonly ViewerWorkspace[] { return [...this.workspaces.values()]; }
 
   /** The cached read for an open document, for the hover to render. */
   viewFor(uri: vscode.Uri): EntityView | undefined {
@@ -113,6 +136,12 @@ export class KinEntityFileSystemProvider
    * the entity actually in front of them.
    */
   forget(uri: vscode.Uri): void {
+    this.documentEpochs.delete(uri.toString());
+    this.reads.delete(uri.toString());
+    this.bindings.delete(uri.toString());
+    this.retainedDrafts.delete(uri.toString());
+    this.sessions.delete(uri.toString());
+    this.writable.delete(uri.toString());
     if (this.views.delete(uri.toString())) {
       this.diagnostics.clear(uri);
     }
@@ -129,6 +158,8 @@ export class KinEntityFileSystemProvider
     const events: vscode.FileChangeEvent[] = [];
     for (const key of this.views.keys()) {
       const uri = vscode.Uri.parse(key, true);
+      // Neither saved nor dirty draft text is a projection of graph changes.
+      if (parseEntityUriParts(uri)?.draftId) continue;
       this.views.delete(key);
       events.push({ type: vscode.FileChangeType.Changed, uri });
     }
@@ -154,7 +185,9 @@ export class KinEntityFileSystemProvider
       ctime: view.readAt,
       mtime: view.readAt,
       size: Buffer.byteLength(view.content, "utf8"),
-      permissions: vscode.FilePermission.Readonly,
+      permissions: this.writable.has(uri.toString()) && this.journal &&
+        parseEntityUriParts(uri)?.draftRevision === undefined
+        ? undefined : vscode.FilePermission.Readonly,
     };
   }
 
@@ -173,8 +206,87 @@ export class KinEntityFileSystemProvider
     throw vscode.FileSystemError.NoPermissions(uri);
   }
 
-  writeFile(uri: vscode.Uri): void {
-    throw refuseWrite(uri);
+  writeFile(uri: vscode.Uri, content: Uint8Array, _options: { create: boolean; overwrite: boolean }): Promise<void> {
+    const address = parseEntityUriParts(uri);
+    if (!address?.draftId || address.draftRevision !== undefined || !this.journal) throw refuseWrite(uri);
+    this.workspaceFor(uri);
+    // Fatal decoding prevents an invalid byte sequence being acknowledged as
+    // replacement characters. Preserve a leading BOM as part of the body.
+    let body: string;
+    try { body = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(content); }
+    catch { throw vscode.FileSystemError.Unavailable("Draft text is not valid UTF-8; no Save was sent."); }
+    return this.saveDraftFile(uri, body);
+  }
+
+  private async saveDraftFile(uri: vscode.Uri, body: string): Promise<void> {
+    await this.read(uri);
+    const session = this.sessions.get(uri.toString());
+    if (!session || !this.writable.has(uri.toString())) throw refuseWrite(uri);
+    try {
+      const saved = await session.save(body);
+      // A close can occur while Save is awaiting its durable acknowledgement.
+      // Do not recreate a closed view or misreport that acknowledgement as lost.
+      const view = this.views.get(uri.toString());
+      if (view && this.sessions.get(uri.toString()) === session) {
+        this.retainedDrafts.set(uri.toString(), saved);
+        view.content = saved.body;
+        view.document.body = saved.body;
+        view.readAt = Math.max(Date.now(), view.readAt + 1);
+        this.diagnostics.clear(uri);
+      }
+    } catch (error) {
+      throw vscode.FileSystemError.Unavailable(`Draft Save was not acknowledged. Keep this buffer and retry Save to recover the same request. ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  draftFor(uri: vscode.Uri): EntityDraft | undefined {
+    return this.sessions.get(uri.toString())?.draft;
+  }
+
+  async startDraft(uri: vscode.Uri): Promise<vscode.Uri> {
+    if (!this.journal) throw refuseWrite(uri);
+    const address = parseEntityUriParts(uri);
+    if (!address || address.draftId) throw new Error("Open current source before starting another draft. Your existing draft stays available.");
+    const workspace = this.workspaceFor(uri);
+    const assertCurrent = this.guard(uri, workspace);
+    const view = await this.read(uri);
+    if (view.document.truncated || !view.document.sourceBase) {
+      throw new Error(view.document.sourceBaseRefusal ?? "Editing requires a complete current source read with an editing base. Historical, truncated and older-daemon reads remain available as source views.");
+    }
+    const capabilities = await workspace.client.draftCapabilities();
+    assertCurrent();
+    if (!capabilities.durable_save_supported) throw new Error(capabilities.refusal?.message ?? "This daemon cannot durably save drafts on the current storage.");
+    const saved = await createEntityDraft(workspace.client, this.journal, uri.toString(), {
+      original_source_base: view.document.sourceBase, original_body: view.document.body, body: view.document.body,
+    }, assertCurrent);
+    assertCurrent();
+    const target = draftUri(uri, saved.draft_id);
+    // Open through readDraft so reopening and first opening use the same path.
+    await this.read(target);
+    return target;
+  }
+
+  async applyDraft(uri: vscode.Uri, resume = false): Promise<DraftApplied> {
+    this.workspaceFor(uri);
+    await this.read(uri);
+    const session = this.sessions.get(uri.toString());
+    if (!session || parseEntityUriParts(uri)?.draftRevision !== undefined) throw refuseWrite(uri);
+    return resume ? session.resumeApply() : session.apply();
+  }
+
+  currentSourceUri(uri: vscode.Uri): vscode.Uri {
+    const address = parseEntityUriParts(uri);
+    if (!address) throw vscode.FileSystemError.FileNotFound(uri);
+    return vscode.Uri.from({ scheme: KIN_SCHEME, authority: uri.authority, path: uri.path,
+      query: `id=${encodeURIComponent(address.entityId)}&read=${randomUUID()}` });
+  }
+
+  private workspaceFor(uri: vscode.Uri): ViewerWorkspace {
+    const address = parseEntityUriParts(uri);
+    if (!address) throw vscode.FileSystemError.FileNotFound(uri);
+    const workspace = this.workspaces.get(address.workspaceKey);
+    if (!workspace) throw vscode.FileSystemError.Unavailable("This entity belongs to a Kin workspace that is no longer open. Open the folder again to recover its drafts.");
+    return workspace;
   }
 
   delete(uri: vscode.Uri): void {
@@ -188,6 +300,13 @@ export class KinEntityFileSystemProvider
   dispose(): void {
     this._onDidChangeFile.dispose();
     this.views.clear();
+    this.sessions.clear();
+    this.writable.clear();
+    this.reads.clear();
+    this.workspaceEpochs.clear();
+    this.documentEpochs.clear();
+    this.bindings.clear();
+    this.retainedDrafts.clear();
     this.workspaces.clear();
   }
 
@@ -203,24 +322,84 @@ export class KinEntityFileSystemProvider
    * relations, so the hover says which read did not answer.
    */
   private async read(uri: vscode.Uri): Promise<EntityView> {
-    const cached = this.views.get(uri.toString());
-    if (cached) {
-      return cached;
-    }
+    const workspace = this.workspaceFor(uri);
+    const key = uri.toString();
+    const cached = this.views.get(key);
+    if (cached && (!this.retainedDrafts.has(key) || this.bindings.get(key) === this.workspaceEpochs.get(workspace.key))) return cached;
 
-    const address = parseEntityUriParts({
-      authority: uri.authority,
-      path: uri.path,
-      query: uri.query,
-    });
-    if (!address) {
-      throw vscode.FileSystemError.FileNotFound(uri);
+    const inFlight = this.reads.get(uri.toString());
+    if (inFlight) return inFlight;
+    const reading = cached ? this.rebind(uri, workspace, cached) : this.load(uri);
+    this.reads.set(uri.toString(), reading);
+    try { return await reading; }
+    finally { if (this.reads.get(key) === reading) this.reads.delete(key); }
+  }
+
+  private guard(uri: vscode.Uri, workspace: ViewerWorkspace): () => void {
+    const key = uri.toString();
+    if (!this.documentEpochs.has(key)) this.documentEpochs.set(key, {});
+    const document = this.documentEpochs.get(key);
+    const epoch = this.workspaceEpochs.get(workspace.key);
+    return () => {
+      if (this.workspaceEpochs.get(workspace.key) !== epoch ||
+          this.workspaces.get(workspace.key)?.client !== workspace.client ||
+          this.documentEpochs.get(key) !== document) {
+        throw vscode.FileSystemError.Unavailable("This draft's workspace connection or document changed. Keep the buffer and reopen the original workspace before retrying.");
+      }
+    };
+  }
+
+  private async rebind(uri: vscode.Uri, workspace: ViewerWorkspace, view: EntityView): Promise<EntityView> {
+    const key = uri.toString();
+    const assertCurrent = this.guard(uri, workspace);
+    const session = this.sessions.get(key);
+    if (session) await session.rebind(workspace.client, assertCurrent);
+    else {
+      const retained = this.retainedDrafts.get(key)!;
+      const current = await workspace.client.readDraft(retained.draft_id, retained.revision);
+      if (!isDeepStrictEqual(current, retained)) throw new Error("The reopened workspace does not contain this draft's exact saved identity and revision.");
     }
-    const workspace = this.workspaces.get(address.workspaceKey);
-    if (!workspace) {
-      throw vscode.FileSystemError.Unavailable(
-        `This entity belongs to a Kin workspace that is no longer open. Open the folder again and reopen the entity.`
-      );
+    let writable = false;
+    if (session && parseEntityUriParts(uri)?.draftRevision === undefined) {
+      try { writable = (await workspace.client.draftCapabilities()).durable_save_supported; }
+      catch (error) { logError("Reopened draft remains readable; Save capability could not be confirmed", error); }
+    }
+    assertCurrent();
+    if (writable) this.writable.add(key);
+    this.bindings.set(key, this.workspaceEpochs.get(workspace.key)!);
+    return view;
+  }
+
+  private async load(uri: vscode.Uri): Promise<EntityView> {
+    const address = parseEntityUriParts(uri)!;
+    const workspace = this.workspaceFor(uri);
+    const assertCurrent = this.guard(uri, workspace);
+    if (address.draftId) {
+      const draft = await workspace.client.readDraft(address.draftId, address.draftRevision);
+      assertCurrent();
+      if (draft.scope.entity_id !== address.entityId) throw new Error("Draft entity identity does not match this document.");
+      const view: EntityView = {
+        document: { entityId: address.entityId, name: address.displayName ?? "Entity draft",
+          kind: address.displayKind ?? "Entity", body: draft.body, truncated: false,
+          sourceBase: draft.original_source_base, provenance: {} },
+        findings: [], content: draft.body, readAt: Date.now(),
+      };
+      let writable = false;
+      if (this.journal && address.draftRevision === undefined) {
+        try {
+          writable = (await workspace.client.draftCapabilities()).durable_save_supported;
+        } catch (error) { logError("Draft remains readable; Save capability could not be confirmed", error); }
+      }
+      assertCurrent();
+      if (this.journal) this.sessions.set(uri.toString(), new EntityDraftSession(
+        draft, workspace.client, this.journal, uri.toString(), assertCurrent,
+      ));
+      if (writable) this.writable.add(uri.toString());
+      this.retainedDrafts.set(uri.toString(), draft);
+      this.bindings.set(uri.toString(), this.workspaceEpochs.get(workspace.key)!);
+      this.views.set(uri.toString(), view);
+      this.diagnostics.clear(uri);
+      return view;
     }
 
     let source: Awaited<ReturnType<KinClient["entitySource"]>>;
@@ -236,6 +415,7 @@ export class KinEntityFileSystemProvider
       );
     }
 
+    assertCurrent();
     const findingLists: GraphFinding[][] = [source.findings];
     let neighborhood: EntityNeighborhood | undefined;
     try {
@@ -248,6 +428,7 @@ export class KinEntityFileSystemProvider
         err
       );
     }
+    assertCurrent();
     try {
       findingLists.push(await workspace.client.graphStatusFindings());
     } catch (err) {
@@ -261,6 +442,7 @@ export class KinEntityFileSystemProvider
       content: renderEntityContent(source.document),
       readAt: Date.now(),
     };
+    assertCurrent();
     this.views.set(uri.toString(), view);
     this.diagnostics.publish(uri, view.findings);
     return view;

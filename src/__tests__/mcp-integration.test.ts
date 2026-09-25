@@ -15,9 +15,10 @@
 // daemon) is a separate, daemon-dependent step and is intentionally NOT done
 // here — these tests are hermetic and CPU-light so they run in ordinary CI.
 
-import { mkdtempSync, realpathSync, rmSync } from "fs";
+import { mkdtempSync, realpathSync, rmSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { pathToFileURL } from "url";
 import type { ChildProcess } from "child_process";
 
 jest.mock(
@@ -176,6 +177,18 @@ describe("MCP frame reader state boundaries", () => {
 });
 
 describe("MCP live integration (real subprocess, real stdio transport)", () => {
+  it("selects the full editor tool surface independently of ambient agent profiles", async () => {
+    const cwd = makeWorkspace();
+    writeFileSync(join(cwd, "mcp"), `require("fs").writeFileSync("argv.json", JSON.stringify(process.argv.slice(2))); import(${JSON.stringify(pathToFileURL(FIXTURE).href)});`);
+    const client = new McpClient(cwd, { timeoutMs: 5_000 });
+    // Node executes our owned fixture using the production launch arguments.
+    (client as unknown as { binaryPath: string }).binaryPath = process.execPath;
+    clients.push(client);
+    await client.connect();
+    expect(client.isConnected()).toBe(true);
+    expect(JSON.parse(readFileSync(join(cwd, "argv.json"), "utf8"))).toEqual(["start", "--tool-profile", "full"]);
+  });
+
   it("performs the initialize handshake and reports connected", async () => {
     const client = await connectClient(makeWorkspace());
     expect(client.isConnected()).toBe(true);

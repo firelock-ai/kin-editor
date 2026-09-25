@@ -192,7 +192,10 @@ export class McpClient implements vscode.Disposable {
 
     const { command, args } = this.spawnOverride ?? {
       command: this.binaryPath!,
-      args: ["mcp", "start"],
+      // The editor calls its fixed graph/draft APIs directly. Agent prompt
+      // profiles withhold some of them, so use the complete supported surface;
+      // every call still needs the daemon's normal session authorization.
+      args: ["mcp", "start", "--tool-profile", "full"],
     };
     const proc = spawn(command, args, {
       cwd: this.workspacePath,
