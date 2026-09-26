@@ -4,6 +4,12 @@ All notable changes to the Kin VS Code extension are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-09-26
+
+### Changed
+
+- Add durable entity drafts and graph diagnostics (#125)
+
 ### Thanks
 
 - Thanks to Jonathan Amponsah (@mgalore) for the workspace symbol provider tests (#114).
