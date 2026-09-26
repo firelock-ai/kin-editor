@@ -104,7 +104,7 @@ export interface InitOutcome {
 
 /** What to put in front of the user once `kin init` has finished. */
 export interface InitSummary {
-  tone: "info" | "error";
+  tone: "info" | "warning" | "error";
   message: string;
 }
 
@@ -141,6 +141,20 @@ function quote(text: string): string {
  * quoted rather than reported as silent.
  */
 export function summarizeInit(outcome: InitOutcome): InitSummary {
+  // These exits follow verified repository admission. Keep the process outcome
+  // intact while allowing the editor to activate the admitted repository.
+  if (outcome.signal === null && (outcome.exitCode === 7 || outcome.exitCode === 8)) {
+    const caveat = outcome.exitCode === 7
+      ? "Enrichment completion is not attested. Run `kin doctor` and `kin daemon status` in this repository, then follow the recovery guidance in the Kin output channel."
+      : "The graph section used to speed up reopening did not persist. Run `kin graph materialize` in this repository to retry that step.";
+    const said = lastNonEmpty(outcome.lines, "stderr") ?? lastNonEmpty(outcome.lines);
+    return {
+      tone: "warning",
+      message: `kin init admitted this repository with a caveat (exit ${outcome.exitCode}). ${caveat}` +
+        (said ? ` CLI output: ${quote(said)}` : " The CLI printed no explanation."),
+    };
+  }
+
   if (outcome.ok) {
     const said = lastNonEmpty(outcome.lines);
     return {

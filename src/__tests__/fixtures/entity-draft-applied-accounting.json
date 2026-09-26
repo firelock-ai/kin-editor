@@ -1,0 +1,301 @@
+{
+  "applied_draft_revision": 2,
+  "current_text_applied": true,
+  "draft": {
+    "applied_receipt": {
+      "attempt": {
+        "arguments": {
+          "operations": [
+            {
+              "body": "def helper(value):\n    return value + 2",
+              "description": "Apply saved entity draft",
+              "payload": {
+                "EntitySourceBase": {
+                  "artifact_id": "22c46823-8c96-5692-9a24-1875f48068ee",
+                  "body_hash": "21164ae25c0fa21ca72c10a3cc089777404f86e405e1e4703b3b6be239a91efd",
+                  "context": {
+                    "repository_id": "5659b9e1-18af-4714-8d57-0e3330d76132",
+                    "workspace_generation": 0,
+                    "workspace_head_hash": "a65213832e4a94f0708f9fe2e711cf3a180f9fbeb9398f1d6abf77f4d36d1bb9",
+                    "workspace_id": "aef00836-e0e0-4fa4-8b7f-6b89d3143e22",
+                    "workspace_tree_hash": "15b293c17133b80289a9bfb7d860236652e8cb85c0e479a71bca727eaa939865"
+                  },
+                  "end_byte": 64,
+                  "entity_id": "b6edce7f-334d-4856-a7a1-c26c2b95b2b5",
+                  "schema": "kin.entity.source_base.v1",
+                  "source_blob_hash": "5ba0495a280d476dbfb10093ee3055d5e0c538ccc9e55ec8ac7b54ac502118b8",
+                  "start_byte": 25
+                }
+              },
+              "target": "b6edce7f-334d-4856-a7a1-c26c2b95b2b5",
+              "verb": "update"
+            }
+          ],
+          "request_id": "draft:4c7b3e69-b4ec-45e3-bda6-c75a1c11417f:2:adad2202-c9db-4f15-9818-3f1b2cce3de6",
+          "scope": "repository",
+          "session_id": "3b8d36c5-be75-4236-906b-2ada768640f2",
+          "summary": "Apply saved entity draft"
+        },
+        "draft_revision": 2,
+        "request_id": "draft:4c7b3e69-b4ec-45e3-bda6-c75a1c11417f:2:adad2202-c9db-4f15-9818-3f1b2cce3de6",
+        "requested_revision": 2,
+        "session_id": "3b8d36c5-be75-4236-906b-2ada768640f2"
+      },
+      "receipt": {
+        "change_id": "1fe26c3e5e9aaa0be6f65ba5d6d65d02f1ccdae561f4e525c93aa9a0de2b8c79",
+        "entity_deltas": 4,
+        "modified_files": [
+          "app.py"
+        ],
+        "ops_applied": 1,
+        "relation_deltas": 1,
+        "repository_generation": 2,
+        "repository_id": "5659b9e1-18af-4714-8d57-0e3330d76132",
+        "repository_operation_id": "b08c07d1-3d25-45dc-850d-20fc976c890f",
+        "repository_transaction_hash": "7fc8a524360f84537c9d0d007ca644d06ca273bf9562e78c5aae7da0515d0874",
+        "request_id": "draft:4c7b3e69-b4ec-45e3-bda6-c75a1c11417f:2:adad2202-c9db-4f15-9818-3f1b2cce3de6",
+        "roots_after": {
+          "collaboration": {
+            "hash": [78, 249, 59, 104, 178, 81, 181, 113, 19, 137, 162, 26, 214, 142, 149, 195, 3, 241, 89, 199, 92, 251, 176, 23, 254, 65, 156, 119, 37, 137, 105, 116],
+            "version": 1
+          },
+          "generation": 2,
+          "history": {
+            "hash": [126, 76, 148, 38, 178, 129, 225, 211, 161, 180, 228, 71, 171, 244, 87, 81, 189, 198, 157, 143, 0, 62, 75, 22, 25, 124, 132, 132, 223, 189, 9, 189],
+            "version": 1
+          },
+          "local_state": {
+            "hash": [233, 170, 227, 62, 91, 61, 156, 144, 163, 154, 186, 163, 243, 23, 244, 235, 120, 70, 115, 109, 132, 253, 22, 5, 227, 218, 5, 86, 253, 20, 50, 159],
+            "version": 1
+          },
+          "ref_log": {
+            "hash": [100, 146, 213, 137, 27, 200, 4, 167, 64, 139, 140, 116, 197, 37, 212, 87, 151, 11, 125, 128, 225, 179, 166, 44, 163, 140, 125, 179, 29, 183, 113, 34],
+            "version": 1
+          },
+          "ref_state": {
+            "hash": [60, 34, 232, 4, 222, 1, 65, 74, 137, 42, 234, 135, 79, 10, 201, 46, 35, 17, 75, 62, 195, 136, 174, 121, 45, 238, 80, 141, 29, 10, 164, 39],
+            "version": 1
+          },
+          "replication": {
+            "hash": [75, 73, 201, 140, 134, 65, 23, 81, 16, 169, 224, 252, 31, 143, 97, 57, 25, 246, 204, 12, 221, 254, 195, 5, 73, 234, 74, 131, 238, 236, 106, 91],
+            "version": 1
+          },
+          "version": 1
+        },
+        "roots_before": {
+          "collaboration": {
+            "hash": [78, 249, 59, 104, 178, 81, 181, 113, 19, 137, 162, 26, 214, 142, 149, 195, 3, 241, 89, 199, 92, 251, 176, 23, 254, 65, 156, 119, 37, 137, 105, 116],
+            "version": 1
+          },
+          "generation": 1,
+          "history": {
+            "hash": [197, 86, 33, 90, 138, 200, 42, 122, 119, 130, 223, 166, 16, 39, 110, 222, 2, 141, 79, 221, 165, 105, 210, 112, 79, 169, 127, 143, 9, 52, 163, 72],
+            "version": 1
+          },
+          "local_state": {
+            "hash": [94, 244, 72, 7, 197, 244, 137, 245, 240, 223, 170, 131, 213, 241, 149, 51, 247, 81, 230, 95, 249, 182, 173, 93, 186, 77, 215, 239, 90, 58, 58, 178],
+            "version": 1
+          },
+          "ref_log": {
+            "hash": [58, 48, 109, 120, 172, 209, 192, 225, 32, 194, 104, 70, 147, 54, 84, 170, 144, 11, 195, 247, 182, 39, 147, 170, 253, 191, 96, 16, 60, 173, 160, 83],
+            "version": 1
+          },
+          "ref_state": {
+            "hash": [70, 120, 175, 221, 113, 229, 183, 250, 41, 189, 207, 51, 70, 244, 40, 79, 154, 231, 97, 178, 25, 88, 145, 177, 217, 226, 151, 59, 132, 45, 117, 160],
+            "version": 1
+          },
+          "replication": {
+            "hash": [75, 73, 201, 140, 134, 65, 23, 81, 16, 169, 224, 252, 31, 143, 97, 57, 25, 246, 204, 12, 221, 254, 195, 5, 73, 234, 74, 131, 238, 236, 106, 91],
+            "version": 1
+          },
+          "version": 1
+        },
+        "schema": "kin.mutate.receipt.v1",
+        "state": "committed",
+        "status": "committed",
+        "transaction_id": "b08c07d1-3d25-45dc-850d-20fc976c890f"
+      }
+    },
+    "body": "def helper(value):\n    return value + 2",
+    "content_revision": 2,
+    "draft_id": "4c7b3e69-b4ec-45e3-bda6-c75a1c11417f",
+    "original_body": "def helper(value):\n    return value + 1",
+    "original_source_base": {
+      "artifact_id": "22c46823-8c96-5692-9a24-1875f48068ee",
+      "body_hash": "21164ae25c0fa21ca72c10a3cc089777404f86e405e1e4703b3b6be239a91efd",
+      "context": {
+        "repository_id": "5659b9e1-18af-4714-8d57-0e3330d76132",
+        "workspace_generation": 0,
+        "workspace_head_hash": "a65213832e4a94f0708f9fe2e711cf3a180f9fbeb9398f1d6abf77f4d36d1bb9",
+        "workspace_id": "aef00836-e0e0-4fa4-8b7f-6b89d3143e22",
+        "workspace_tree_hash": "15b293c17133b80289a9bfb7d860236652e8cb85c0e479a71bca727eaa939865"
+      },
+      "end_byte": 64,
+      "entity_id": "b6edce7f-334d-4856-a7a1-c26c2b95b2b5",
+      "schema": "kin.entity.source_base.v1",
+      "source_blob_hash": "5ba0495a280d476dbfb10093ee3055d5e0c538ccc9e55ec8ac7b54ac502118b8",
+      "start_byte": 25
+    },
+    "pending_apply": null,
+    "previous_record_hash": "0b53d0a5dcf75828084c7f14ad14e12608fd290c021e57408555b4d9e959f045",
+    "request_hash": "c5e259e3ece7741166e849b2e404555364c2d5297a5708af0502b0fe1ba4d4af",
+    "revision": 4,
+    "schema": "kin.entity.draft.v1",
+    "scope": {
+      "entity_id": "b6edce7f-334d-4856-a7a1-c26c2b95b2b5",
+      "owner": "local-bearer-v1",
+      "repository_id": "5659b9e1-18af-4714-8d57-0e3330d76132",
+      "workspace_id": "aef00836-e0e0-4fa4-8b7f-6b89d3143e22"
+    }
+  },
+  "draft_id": "4c7b3e69-b4ec-45e3-bda6-c75a1c11417f",
+  "publication_accounting": {
+    "entities": {
+      "carried_unchanged": {
+        "count": 0
+      },
+      "pending_and_publication": {
+        "count": 0
+      },
+      "publication_only": {
+        "count": 4,
+        "sample_ids": [
+          "4377ffc3-5374-4893-8826-cc8ad1a731a9",
+          "88d6a507-42aa-414c-8646-21e5192f454e",
+          "b6edce7f-334d-4856-a7a1-c26c2b95b2b5"
+        ]
+      },
+      "published_total": 4,
+      "workspace_only": {
+        "count": 0
+      }
+    },
+    "identity_sample_limit": 3,
+    "meaning": "Counts compare parent, admitted workspace, and published values; publication transitions include derivation and are not authorship or behavior-change counts. Source-unit transitions independently disclose pending bytes.",
+    "relationships": {
+      "carried_unchanged": {
+        "count": 0
+      },
+      "pending_and_publication": {
+        "count": 0
+      },
+      "publication_only": {
+        "count": 1,
+        "sample_ids": [
+          "0bba875b-47cd-96bc-c4d7-9b11267f7f56"
+        ]
+      },
+      "published_total": 1,
+      "workspace_only": {
+        "count": 0
+      }
+    },
+    "requested": {
+      "omitted_operations": 0,
+      "operation_count": 1,
+      "sample_operations": [
+        {
+          "target": {
+            "entity_id": "b6edce7f-334d-4856-a7a1-c26c2b95b2b5"
+          },
+          "verb": "update"
+        }
+      ],
+      "status": "verified_request"
+    },
+    "schema": "kin.publication_accounting.v1",
+    "source_units": {
+      "carried_unchanged": {
+        "count": 0
+      },
+      "pending_and_publication": {
+        "count": 0
+      },
+      "publication_only": {
+        "count": 1
+      },
+      "published_total": 1,
+      "workspace_only": {
+        "count": 0
+      }
+    },
+    "status": "exact"
+  },
+  "receipt": {
+    "change_id": "1fe26c3e5e9aaa0be6f65ba5d6d65d02f1ccdae561f4e525c93aa9a0de2b8c79",
+    "entity_deltas": 4,
+    "modified_files": [
+      "app.py"
+    ],
+    "ops_applied": 1,
+    "relation_deltas": 1,
+    "repository_generation": 2,
+    "repository_id": "5659b9e1-18af-4714-8d57-0e3330d76132",
+    "repository_operation_id": "b08c07d1-3d25-45dc-850d-20fc976c890f",
+    "repository_transaction_hash": "7fc8a524360f84537c9d0d007ca644d06ca273bf9562e78c5aae7da0515d0874",
+    "request_id": "draft:4c7b3e69-b4ec-45e3-bda6-c75a1c11417f:2:adad2202-c9db-4f15-9818-3f1b2cce3de6",
+    "roots_after": {
+      "collaboration": {
+        "hash": [78, 249, 59, 104, 178, 81, 181, 113, 19, 137, 162, 26, 214, 142, 149, 195, 3, 241, 89, 199, 92, 251, 176, 23, 254, 65, 156, 119, 37, 137, 105, 116],
+        "version": 1
+      },
+      "generation": 2,
+      "history": {
+        "hash": [126, 76, 148, 38, 178, 129, 225, 211, 161, 180, 228, 71, 171, 244, 87, 81, 189, 198, 157, 143, 0, 62, 75, 22, 25, 124, 132, 132, 223, 189, 9, 189],
+        "version": 1
+      },
+      "local_state": {
+        "hash": [233, 170, 227, 62, 91, 61, 156, 144, 163, 154, 186, 163, 243, 23, 244, 235, 120, 70, 115, 109, 132, 253, 22, 5, 227, 218, 5, 86, 253, 20, 50, 159],
+        "version": 1
+      },
+      "ref_log": {
+        "hash": [100, 146, 213, 137, 27, 200, 4, 167, 64, 139, 140, 116, 197, 37, 212, 87, 151, 11, 125, 128, 225, 179, 166, 44, 163, 140, 125, 179, 29, 183, 113, 34],
+        "version": 1
+      },
+      "ref_state": {
+        "hash": [60, 34, 232, 4, 222, 1, 65, 74, 137, 42, 234, 135, 79, 10, 201, 46, 35, 17, 75, 62, 195, 136, 174, 121, 45, 238, 80, 141, 29, 10, 164, 39],
+        "version": 1
+      },
+      "replication": {
+        "hash": [75, 73, 201, 140, 134, 65, 23, 81, 16, 169, 224, 252, 31, 143, 97, 57, 25, 246, 204, 12, 221, 254, 195, 5, 73, 234, 74, 131, 238, 236, 106, 91],
+        "version": 1
+      },
+      "version": 1
+    },
+    "roots_before": {
+      "collaboration": {
+        "hash": [78, 249, 59, 104, 178, 81, 181, 113, 19, 137, 162, 26, 214, 142, 149, 195, 3, 241, 89, 199, 92, 251, 176, 23, 254, 65, 156, 119, 37, 137, 105, 116],
+        "version": 1
+      },
+      "generation": 1,
+      "history": {
+        "hash": [197, 86, 33, 90, 138, 200, 42, 122, 119, 130, 223, 166, 16, 39, 110, 222, 2, 141, 79, 221, 165, 105, 210, 112, 79, 169, 127, 143, 9, 52, 163, 72],
+        "version": 1
+      },
+      "local_state": {
+        "hash": [94, 244, 72, 7, 197, 244, 137, 245, 240, 223, 170, 131, 213, 241, 149, 51, 247, 81, 230, 95, 249, 182, 173, 93, 186, 77, 215, 239, 90, 58, 58, 178],
+        "version": 1
+      },
+      "ref_log": {
+        "hash": [58, 48, 109, 120, 172, 209, 192, 225, 32, 194, 104, 70, 147, 54, 84, 170, 144, 11, 195, 247, 182, 39, 147, 170, 253, 191, 96, 16, 60, 173, 160, 83],
+        "version": 1
+      },
+      "ref_state": {
+        "hash": [70, 120, 175, 221, 113, 229, 183, 250, 41, 189, 207, 51, 70, 244, 40, 79, 154, 231, 97, 178, 25, 88, 145, 177, 217, 226, 151, 59, 132, 45, 117, 160],
+        "version": 1
+      },
+      "replication": {
+        "hash": [75, 73, 201, 140, 134, 65, 23, 81, 16, 169, 224, 252, 31, 143, 97, 57, 25, 246, 204, 12, 221, 254, 195, 5, 73, 234, 74, 131, 238, 236, 106, 91],
+        "version": 1
+      },
+      "version": 1
+    },
+    "schema": "kin.mutate.receipt.v1",
+    "state": "committed",
+    "status": "committed",
+    "transaction_id": "b08c07d1-3d25-45dc-850d-20fc976c890f"
+  },
+  "receipt_saved": true,
+  "requested_revision": 2,
+  "schema": "kin.entity.draft.applied.v1"
+}

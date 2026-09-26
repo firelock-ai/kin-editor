@@ -38,6 +38,10 @@ export interface EntityLocator {
 export interface EntityAddress {
   workspaceKey: string;
   entityId: string;
+  /** Durable editing state, resolved by UUID independently of the live entity. */
+  draftId?: string;
+  /** An explicit older revision is a read-only recovery view. */
+  draftRevision?: number;
   /** The kind the URI was built with. Display only; may be stale. */
   displayKind?: string;
   /** The name the URI was built with. Display only; may be stale. */
@@ -112,11 +116,12 @@ export function buildEntityUriParts(locator: EntityLocator): UriParts {
 /**
  * Read a `kin://` URI back to the entity it addresses.
  *
- * Returns `undefined` when the URI carries no entity id, which is the only
- * refusal this needs: a URI without one addresses no entity, and guessing one
- * from the path is exactly the file lookup this scheme exists to avoid.
+ * Require one entity id and unambiguous draft/recovery selectors. A malformed
+ * recovery selector must not silently select the writable latest revision; the
+ * display path never supplies a missing identity.
  */
 export function parseEntityUriParts(parts: UriParts): EntityAddress | undefined {
+  if (queryValues(parts.query, ENTITY_ID_PARAM).length !== 1) return undefined;
   const entityId = readQueryParam(parts.query, ENTITY_ID_PARAM);
   if (!entityId) {
     return undefined;
@@ -126,6 +131,20 @@ export function parseEntityUriParts(parts: UriParts): EntityAddress | undefined 
     workspaceKey: parts.authority,
     entityId,
   };
+  const draftValues = queryValues(parts.query, "draft");
+  if (draftValues.length > 1) return undefined;
+  const draftId = draftValues[0];
+  if (draftId !== undefined) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(draftId)) return undefined;
+    address.draftId = draftId;
+  }
+  const revisions = queryValues(parts.query, "revision");
+  if (revisions.length > 1) return undefined;
+  const revision = revisions[0];
+  if (revision !== undefined) {
+    if (!draftId || !/^[1-9][0-9]*$/.test(revision) || !Number.isSafeInteger(Number(revision))) return undefined;
+    address.draftRevision = Number(revision);
+  }
   if (segments.length >= 2) {
     address.displayKind = segments[0];
     address.displayName = stripKnownExtension(segments[segments.length - 1]);
@@ -138,9 +157,16 @@ export function parseEntityUriParts(parts: UriParts): EntityAddress | undefined 
  *
  * Hand-rolled rather than routed through `URLSearchParams` because a VS Code
  * `Uri.query` is already the decoded query for some producers and the raw one
- * for others, and this only ever has to read the one key this module writes.
+ * for others. Parse only the identity and revision selectors this module owns.
  */
 function readQueryParam(query: string, key: string): string | undefined {
+  const value = queryValues(query, key)[0];
+  return value === "" ? undefined : value;
+}
+
+/** Presence matters: an empty recovery selector must never become latest. */
+function queryValues(query: string, key: string): string[] {
+  const values: string[] = [];
   for (const pair of query.split("&")) {
     if (pair.length === 0) {
       continue;
@@ -151,10 +177,9 @@ function readQueryParam(query: string, key: string): string | undefined {
       continue;
     }
     const raw = separator === -1 ? "" : pair.slice(separator + 1);
-    const value = safeDecode(raw);
-    return value.length > 0 ? value : undefined;
+    values.push(safeDecode(raw));
   }
-  return undefined;
+  return values;
 }
 
 function safeDecode(value: string): string {

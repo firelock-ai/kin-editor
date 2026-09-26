@@ -91,6 +91,48 @@
         "command": "kin.openEntity",
         "title": "Kin: Open Entity from the Graph",
         "category": "Kin"
+      },
+      {
+        "command": "kin.editEntity",
+        "title": "Kin: Edit Entity",
+        "category": "Kin",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "kin.applyDraft",
+        "title": "Kin: Apply Saved Draft",
+        "category": "Kin",
+        "icon": "$(check)"
+      },
+      {
+        "command": "kin.resumeDraftApply",
+        "title": "Kin: Resume Interrupted Apply",
+        "category": "Kin",
+        "icon": "$(history)"
+      },
+      {
+        "command": "kin.compareDraft",
+        "title": "Kin: Compare Draft with Current Source",
+        "category": "Kin",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "kin.newDraftFromCurrent",
+        "title": "Kin: New Draft from Current Source",
+        "category": "Kin",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "kin.openDrafts",
+        "title": "Kin: Open Saved Draft",
+        "category": "Kin",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "kin.recoverDraftRevision",
+        "title": "Kin: Recover Saved Draft Revision",
+        "category": "Kin",
+        "icon": "$(history)"
       }
     ],
     "viewsContainers": {
@@ -161,6 +203,48 @@
           "command": "kin.review",
           "group": "kin@3",
           "when": "editorTextFocus"
+        },
+        {
+          "command": "kin.editEntity",
+          "when": "resourceScheme == kin && kin.entitySource",
+          "group": "kinDraft@1"
+        },
+        {
+          "command": "kin.applyDraft",
+          "when": "resourceScheme == kin && kin.entityDraft && !kin.entityDraftRecovery",
+          "group": "kinDraft@2"
+        },
+        {
+          "command": "kin.resumeDraftApply",
+          "when": "resourceScheme == kin && kin.entityDraft && !kin.entityDraftRecovery",
+          "group": "kinDraft@3"
+        },
+        {
+          "command": "kin.compareDraft",
+          "when": "resourceScheme == kin && kin.entityDraft",
+          "group": "kinDraft@4"
+        },
+        {
+          "command": "kin.newDraftFromCurrent",
+          "when": "resourceScheme == kin && kin.entityDraft",
+          "group": "kinDraft@5"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "kin.editEntity",
+          "when": "resourceScheme == kin && kin.entitySource",
+          "group": "navigation@1"
+        },
+        {
+          "command": "kin.applyDraft",
+          "when": "resourceScheme == kin && kin.entityDraft && !kin.entityDraftRecovery",
+          "group": "navigation@2"
+        },
+        {
+          "command": "kin.compareDraft",
+          "when": "resourceScheme == kin && kin.entityDraft",
+          "group": "navigation@3"
         }
       ]
     },
@@ -224,7 +308,7 @@
         "kin.entityViewer": {
           "type": "boolean",
           "default": true,
-          "description": "Browse the Kin graph by namespace and kind, and open an entity as a read-only kin:// document served from graph-owned truth, with the daemon's semantic findings on it. Turn this off to go back to the file-first Entity Explorer, which opens the projected file instead. The viewer needs the MCP graph path (kin.mcpEnabled) and never falls back to reading files."
+          "description": "Browse graph entities and open graph-owned source. Edit Entity creates a durable draft: Save preserves exact text, including unfinished code, and Apply Saved Draft explicitly publishes through Kin. Requires the MCP daemon and durable draft support. Source, historical and truncated views remain read-only."
         }
       }
     },

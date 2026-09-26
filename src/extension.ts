@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
+import { EntityDraftCommands } from "./entity-draft-commands";
 import { EntityExplorerProvider } from "./entity-explorer";
 import { GraphBrowserProvider } from "./graph-browser";
 import { GraphDiagnostics } from "./graph-diagnostics";
@@ -55,6 +56,13 @@ const CONTRIBUTED_COMMANDS = [
   "kin.refresh",
   "kin.openWalkthrough",
   "kin.openEntity",
+  "kin.editEntity",
+  "kin.applyDraft",
+  "kin.resumeDraftApply",
+  "kin.compareDraft",
+  "kin.newDraftFromCurrent",
+  "kin.openDrafts",
+  "kin.recoverDraftRevision",
 ] as const;
 
 /**
@@ -166,6 +174,13 @@ export function activate(context: vscode.ExtensionContext): void {
         "kin.review",
         "kin.refresh",
         "kin.openEntity",
+        "kin.editEntity",
+        "kin.applyDraft",
+        "kin.resumeDraftApply",
+        "kin.compareDraft",
+        "kin.newDraftFromCurrent",
+        "kin.openDrafts",
+        "kin.recoverDraftRevision",
       ].map((id) => vscode.commands.registerCommand(id, guideToSetup))
     );
 
@@ -221,16 +236,19 @@ export function activate(context: vscode.ExtensionContext): void {
   // scheme is genuinely inert rather than answering with a hidden feature.
   const entityViewerEnabled = config.get<boolean>("entityViewer", true);
   let entityProvider: KinEntityFileSystemProvider | undefined;
+  let draftCommands: EntityDraftCommands | undefined;
   if (entityViewerEnabled) {
     const diagnostics = new GraphDiagnostics();
-    entityProvider = new KinEntityFileSystemProvider(diagnostics);
+    entityProvider = new KinEntityFileSystemProvider(diagnostics, context.workspaceState);
     entityProvider.setWorkspaces(viewerWorkspaces(manager));
+    draftCommands = new EntityDraftCommands(entityProvider);
     context.subscriptions.push(
       diagnostics,
       entityProvider,
+      draftCommands,
       vscode.workspace.registerFileSystemProvider("kin", entityProvider, {
         isCaseSensitive: true,
-        isReadonly: true,
+        isReadonly: false,
       }),
       vscode.languages.registerHoverProvider(
         { scheme: "kin" },
@@ -298,6 +316,10 @@ export function activate(context: vscode.ExtensionContext): void {
     // from a disposed client.
     entityProvider?.setWorkspaces(viewerWorkspaces(manager!));
     entityProvider?.invalidateAll();
+    if (mcpEnabled) void manager!.connectAll().then(() => {
+      refreshTrees();
+      statusBar?.update();
+    });
     statusBar?.update();
     reviewProvider.onActiveEditorChanged(vscode.window.activeTextEditor);
   };
@@ -373,6 +395,41 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       await openEntityDocument(manager!, target);
+    }),
+
+    vscode.commands.registerCommand("kin.editEntity", async () => {
+      if (draftCommands) await draftCommands.edit();
+      else await vscode.window.showInformationMessage("Enable kin.entityViewer to open and edit graph entities.");
+    }),
+
+    vscode.commands.registerCommand("kin.applyDraft", async () => {
+      if (draftCommands) await draftCommands.apply();
+      else await vscode.window.showInformationMessage("Enable kin.entityViewer to open and edit graph entities.");
+    }),
+
+    vscode.commands.registerCommand("kin.resumeDraftApply", async () => {
+      if (draftCommands) await draftCommands.apply(true);
+      else await vscode.window.showInformationMessage("Enable kin.entityViewer to open and edit graph entities.");
+    }),
+
+    vscode.commands.registerCommand("kin.compareDraft", async () => {
+      if (draftCommands) await draftCommands.compare();
+      else await vscode.window.showInformationMessage("Enable kin.entityViewer to open and edit graph entities.");
+    }),
+
+    vscode.commands.registerCommand("kin.newDraftFromCurrent", async () => {
+      if (draftCommands) await draftCommands.fresh();
+      else await vscode.window.showInformationMessage("Enable kin.entityViewer to open and edit graph entities.");
+    }),
+
+    vscode.commands.registerCommand("kin.openDrafts", async () => {
+      if (draftCommands) await draftCommands.openDrafts();
+      else await vscode.window.showInformationMessage("Enable kin.entityViewer to open and edit graph entities.");
+    }),
+
+    vscode.commands.registerCommand("kin.recoverDraftRevision", async () => {
+      if (draftCommands) await draftCommands.recoverRevision();
+      else await vscode.window.showInformationMessage("Enable kin.entityViewer to open and edit graph entities.");
     }),
 
     vscode.commands.registerCommand("kin.status", async () => {
@@ -546,9 +603,8 @@ const EMPTY_EXPLORER: vscode.TreeDataProvider<never> = {
  * Publish whether this workspace has a Kin graph, for the `when` clauses in
  * contributes.viewsWelcome.
  *
- * The key is only ever set from what the workspace manager found, never from
- * an assumption, so the welcome block cannot claim a state the extension did
- * not observe.
+ * The key follows workspace discovery or the CLI's verified admission outcome,
+ * so an enrichment caveat does not hide a repository that was admitted.
  */
 async function setInitialized(value: boolean): Promise<void> {
   await vscode.commands.executeCommand("setContext", CONTEXT_INITIALIZED, value);
@@ -598,7 +654,7 @@ async function offerFirstRun(
  * on the failing path is the CLI's own last line, quoted; this function has no
  * opinion about why an init refused and does not invent one.
  *
- * Returns true only when the CLI exited zero.
+ * Returns true when the CLI reports admission, including its explicit caveats.
  */
 async function initGraph(
   folders: readonly vscode.WorkspaceFolder[]
@@ -647,11 +703,10 @@ async function initGraph(
   }
 
   await setInitialized(true);
-  const choice = await vscode.window.showInformationMessage(
-    `${summary.message} Reload the window to activate the explorer and the query commands.`,
-    "Reload Window",
-    "Show output"
-  );
+  const message = `${summary.message} Reload the window to activate the explorer and the query commands.`;
+  const choice = summary.tone === "warning"
+    ? await vscode.window.showWarningMessage(message, "Reload Window", "Show output")
+    : await vscode.window.showInformationMessage(message, "Reload Window", "Show output");
   if (choice === "Reload Window") {
     await vscode.commands.executeCommand("workbench.action.reloadWindow");
   } else if (choice === "Show output") {

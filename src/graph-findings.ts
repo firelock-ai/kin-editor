@@ -16,9 +16,11 @@
 // built from what the daemon said about its own graph.
 //
 // Wording rule for this module: a finding restates the daemon's field, and
-// where the daemon publishes its own sentence (`note`, `disclosure`, `reason`,
-// `limiting_factor`) that sentence is quoted rather than paraphrased. An
-// invented explanation for a flag would be a fabrication wearing a diagnostic.
+// Legacy sentences are retained. Envelope v2 codes use the public producer's
+// vocabulary; unknown versions and codes remain visible without certifying
+// coverage the extension cannot interpret.
+
+import diagnosticCodes from "./diagnostic-codes.json";
 
 /** How loud a finding is. Maps onto VS Code's diagnostic severities. */
 export type FindingSeverity = "error" | "warning" | "info";
@@ -117,6 +119,60 @@ const DEGRADED_FLAGS: Readonly<
   },
 };
 
+const CLAUSE_MESSAGES: Readonly<Record<string, string>> = diagnosticCodes.clauses;
+
+// Public envelope.rs / locate.rs labels supplement the verdict vocabulary.
+const LIMIT_MESSAGES: Readonly<Record<string, string>> = {
+  vector_support_disabled: "This Kin build has no vector support, so semantic ranking is unavailable.",
+  vector_index_absent: "No vector index is available for this graph, so semantic ranking is unavailable.",
+  embeddings_incomplete: "Some eligible entities have not been embedded, so semantic retrieval may miss them.",
+  embeddings_partial: "Some eligible entities have not been embedded, so semantic retrieval may miss them.",
+  embeddings_absent: "No entity has an indexed embedding, so an empty semantic result means nothing was ranked.",
+  embeddings_unknown: "Embedding coverage was not reported, so this answer cannot establish complete semantic coverage.",
+  graph_role_filter: "Test-role source paths were excluded from ranking. Include tests to search those paths.",
+  graph_role_filter_withheld: "Test-role source paths were excluded from ranking. Include tests to search those paths.",
+  graph_body_gap: "Some graph-owned source paths have no body available for ranking.",
+  type_annotation_edges_not_walked: "The walk did not follow type-annotation edges; this is a traversal choice, not evidence of a missing reference.",
+  file_parsed_absent: "The graph has no complete parse for this file, so its entity list may be incomplete.",
+  file_parsed_unknown: "The file's parse coverage was not established, so its entity list may be incomplete.",
+  file_content_opaque_no_adapter_for_path: "This Kin build has no language adapter for this path, so the graph stores its content without a semantic entity list.",
+  "absence_coverage:unreported": "The answer did not report the language coverage needed to interpret an empty result.",
+  "absence_coverage:classes_unmeasured": "No coverage class was measured for this language, so an empty result cannot establish absence.",
+  "absence_coverage:scope_empty": "The graph has no entities in this query's scope, so an empty result does not establish absence in the code.",
+  "absence_coverage:name_filter_narrowed": "The name matched declarations, but the query's other filters excluded them.",
+  "edge_coverage:unreported": "The answer did not report the cross-file edge coverage it depends on.",
+  "edge_coverage:reference_enrichment_unsupported": "Cross-file reference enrichment is unavailable for this language or its language server.",
+};
+
+function codeMeaning(code: string): string | undefined {
+  if (Object.hasOwn(CLAUSE_MESSAGES, code)) return CLAUSE_MESSAGES[code];
+  if (Object.hasOwn(LIMIT_MESSAGES, code)) return LIMIT_MESSAGES[code];
+  if (code.startsWith("degraded:")) {
+    const flag = code.slice("degraded:".length);
+    if (Object.hasOwn(DEGRADED_FLAGS, flag)) return DEGRADED_FLAGS[flag].message;
+  }
+  const edge = /^edge_coverage:(calls|imports|references|overrides)_(absent|unproduced|unknown)$/.exec(code);
+  if (edge) {
+    return edge[2] === "unknown"
+      ? `Cross-file ${edge[1]} coverage was not established, so those references may be missing from this answer.`
+      : `The graph has no observed cross-file ${edge[1]} edges for this coverage class, so missing references are a graph gap rather than proof of absence in the code.`;
+  }
+  const opaque = /^file_content_opaque_no_adapter_for_extension:([a-z0-9_-]+)$/.exec(code);
+  if (opaque) {
+    return `This Kin build has no language adapter for .${opaque[1]} files, so the graph stores this content without a semantic entity list.`;
+  }
+  return undefined;
+}
+
+function diagnosticDetail(labels: readonly string[], version: unknown): string {
+  if (version === undefined || version === 1) return labels.join(", ");
+  return [...new Set(labels.map((label) => label.trim()).filter(Boolean))]
+    .map((code) => {
+      const meaning = version === diagnosticCodes.envelopeVersion ? codeMeaning(code) : undefined;
+      return meaning ?? `Unknown Kin diagnostic code "${code}". This extension cannot explain this condition; do not treat this answer as complete. Check the daemon output or update the extension.`;
+    }).join(" ");
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -150,10 +206,18 @@ export function findingsFromPayload(payload: unknown): GraphFinding[] {
   const envelope = isRecord(payload._kin) ? payload._kin : undefined;
 
   if (envelope) {
+    const version = envelope.envelope_version;
+    if (version !== undefined && version !== 1 && version !== diagnosticCodes.envelopeVersion) {
+      findings.push({
+        code: "envelope.unsupported_version",
+        severity: "warning",
+        message: `This extension does not support Kin envelope version ${JSON.stringify(version)}. Its coverage claims cannot be verified here; update the extension before relying on an empty answer.`,
+      });
+    }
     findings.push(...degradedFindings(envelope.degraded));
-    findings.push(...verdictFindings(envelope.verdict));
-    findings.push(...completenessFindings(envelope.completeness));
-    findings.push(...coverageFindings(envelope.semantic_coverage));
+    findings.push(...verdictFindings(envelope.verdict, version));
+    findings.push(...completenessFindings(envelope.completeness, version));
+    findings.push(...coverageFindings(envelope.semantic_coverage, version));
     findings.push(...behindFindings(envelope.behind));
     findings.push(...freshnessFindings(envelope.freshness));
     findings.push(...watcherLossFindings(envelope.watcher_loss));
@@ -187,70 +251,82 @@ function degradedFindings(degraded: unknown): GraphFinding[] {
   return findings;
 }
 
-function verdictFindings(verdict: unknown): GraphFinding[] {
+function verdictFindings(verdict: unknown, version: unknown): GraphFinding[] {
   if (!isRecord(verdict)) {
     return [];
   }
   const state = str(verdict.state);
-  if (!state || state === "conclusive") {
-    return [];
-  }
   const limiting = str(verdict.limiting_factor);
   const note = str(verdict.note);
-  const detail = limiting ?? note;
+  const coded = version !== undefined && version !== 1;
+  const factor = limiting
+    ? coded ? diagnosticDetail(limiting.split(";"), version) : limiting
+    : undefined;
+  const detail = coded ? [factor, note].filter(Boolean).join(" ") : factor ?? note;
+  if (!state || (state === "conclusive" && !(coded && limiting))) {
+    return [];
+  }
   return [
     {
       code: `verdict.${state}`,
       // The envelope's own instruction is that an inconclusive verdict means
       // the counts are a lower bound and an absence in the answer must not be
       // acted on. That is a warning, not a note.
-      severity: state === "inconclusive" ? "warning" : "info",
+      severity: state === "inconclusive" || coded ? "warning" : "info",
       message:
-        `Kin's verdict for this answer is "${state}", so treat what it contains as a lower bound and do not read an absence as proof.` +
+        (state === "conclusive"
+          ? "Kin returned diagnostic conditions alongside a conclusive verdict. Review them before relying on this answer."
+          : `Kin's verdict for this answer is "${state}", so treat what it contains as a lower bound and do not read an absence as proof.`) +
         (detail ? ` ${detail}` : ""),
     },
   ];
 }
 
-function completenessFindings(completeness: unknown): GraphFinding[] {
+function completenessFindings(completeness: unknown, version: unknown): GraphFinding[] {
   if (!isRecord(completeness)) {
     return [];
   }
   const status = str(completeness.status);
   const bound = str(completeness.bound);
-  if (status === "complete" && bound === "exact") {
-    return [];
-  }
-  const note = str(completeness.note);
   const limits = Array.isArray(completeness.limits)
     ? completeness.limits.filter((limit): limit is string => typeof limit === "string")
     : [];
-  const detail = note ?? (limits.length > 0 ? `Limited by: ${limits.join(", ")}.` : undefined);
+  const exact = status === "complete" && bound === "exact";
+  if (exact && !(version !== undefined && version !== 1 && limits.length > 0)) {
+    return [];
+  }
+  const note = str(completeness.note);
+  const limitDetail = limits.length > 0 ? diagnosticDetail(limits, version) : undefined;
+  const detail = version !== undefined && version !== 1
+    ? [note, limitDetail].filter(Boolean).join(" ")
+    : note ?? limitDetail;
   return [
     {
       code: `completeness.${status ?? "unknown"}`,
       severity: "warning",
       message:
-        `This answer is ${status ?? "not complete"} and its counts are a ${bound ?? "floor"} rather than an exact figure.` +
+        (exact
+          ? "Kin reported exact counts with these additional conditions."
+          : `This answer is ${status ?? "not complete"} and its counts are ${bound === "at_least" ? "a lower bound" : bound === "exact" ? "reported as exact despite incomplete coverage" : "not established as exact"}.`) +
         (detail ? ` ${detail}` : ""),
     },
   ];
 }
 
-function coverageFindings(coverage: unknown): GraphFinding[] {
+function coverageFindings(coverage: unknown, version: unknown): GraphFinding[] {
   if (!isRecord(coverage)) {
     return [];
   }
   const pending = num(coverage.pending) ?? 0;
   const complete = coverage.complete === true;
-  if (complete && pending === 0) {
-    return [];
-  }
   const indexed = num(coverage.indexed);
   const total = num(coverage.total);
   const limitedBy = Array.isArray(coverage.limited_by)
     ? coverage.limited_by.filter((limit): limit is string => typeof limit === "string")
     : [];
+  if (complete && pending === 0 && !(version !== undefined && version !== 1 && limitedBy.length > 0)) {
+    return [];
+  }
   const counts =
     indexed !== undefined && total !== undefined
       ? ` ${indexed} of ${total} embedded, ${pending} pending.`
@@ -260,8 +336,10 @@ function coverageFindings(coverage: unknown): GraphFinding[] {
       code: "semantic_coverage.incomplete",
       severity: "info",
       message:
-        `Semantic coverage over this graph is incomplete, so retrieval saw less than the whole repository.${counts}` +
-        (limitedBy.length > 0 ? ` Limited by: ${limitedBy.join(", ")}.` : ""),
+        (complete && pending === 0
+          ? `Kin reported complete semantic coverage with additional conditions.${counts}`
+          : `Semantic coverage over this graph is incomplete, so retrieval saw less than the whole repository.${counts}`) +
+        (limitedBy.length > 0 ? ` ${diagnosticDetail(limitedBy, version)}` : ""),
     },
   ];
 }

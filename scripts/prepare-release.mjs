@@ -81,6 +81,12 @@ function prependChangelog(changelog, version, subjects, date) {
   }
   const bullets = subjects.map((subject) => `- ${subject}`).join("\n");
   const entry = `\n## [${version}] - ${date}\n\n### Changed\n\n${bullets}\n`;
+  // Notes kept under Unreleased belong to this release: the new heading goes
+  // below Unreleased and above them, which leaves Unreleased empty again.
+  const unreleased = `${marker}\n## [Unreleased]\n`;
+  if (changelog.includes(unreleased)) {
+    return changelog.replace(unreleased, `${unreleased}${entry}`);
+  }
   return changelog.replace(marker, `${marker}${entry}`);
 }
 

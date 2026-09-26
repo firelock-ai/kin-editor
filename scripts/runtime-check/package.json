@@ -1,0 +1,13 @@
+{
+  "name": "kin-editor-runtime-check",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Runs the packaged Kin VS Code extension inside a real VS Code against a given kin binary.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "check": "node ./run.mjs"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "3.1.0"
+  }
+}
