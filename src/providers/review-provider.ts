@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
-import { KinClient } from "../kin-client";
+import { KinClient, KinReviewEnrichment } from "../kin-client";
+import { verdictDetail } from "../graph-findings";
 
 /** A single finding from `kin review`. */
 export interface ReviewFinding {
@@ -19,6 +20,9 @@ export interface ReviewResult {
   file: string;
   findings: ReviewFinding[];
   summary: string;
+  enrichment?: KinReviewEnrichment;
+  verdict?: Record<string, unknown>;
+  envelopeVersion?: unknown;
 }
 
 export class KinReviewProvider implements vscode.Disposable {
@@ -106,10 +110,31 @@ export class KinReviewProvider implements vscode.Disposable {
       return;
     }
 
+    const verdictLimitation = verdictDetail(result.verdict, result.envelopeVersion);
+    const bounded = result.enrichment?.status === "bounded"
+      || result.verdict?.state === "inconclusive"
+      || !!verdictLimitation;
+    const certified = !bounded && result.verdict?.state === "certified";
+    const qualification = bounded ? "not settled" : "completeness unavailable";
+    if (!certified) {
+      const details = [result.enrichment?.limitation, verdictLimitation]
+        .filter((value): value is string => typeof value === "string" && !!value.trim())
+        .map((value) => value.trim());
+      const limitation = details.join(" ") || (bounded
+        ? "Kin reports that this review is bounded."
+        : "This answer does not carry a recognized completeness verdict.");
+      this.outputChannel.appendLine(`${qualification}: ${limitation}`);
+      vscode.window.showWarningMessage(`Kin Review: ${qualification}. ${limitation}`);
+    }
+
     // Display findings in the output channel
     if (result.findings.length === 0) {
-      this.outputChannel.appendLine("No findings detected.");
-      vscode.window.showInformationMessage("Kin Review: no findings.");
+      this.outputChannel.appendLine(!certified
+        ? `No findings detected; ${qualification}.`
+        : "No findings detected.");
+      if (certified) {
+        vscode.window.showInformationMessage("Kin Review: no findings.");
+      }
       this.clearReviewState();
       return;
     }
@@ -153,7 +178,7 @@ export class KinReviewProvider implements vscode.Disposable {
     ).length;
 
     vscode.window.showInformationMessage(
-      `Kin Review: ${errorCount} error(s), ${warnCount} warning(s), ${result.findings.length - errorCount - warnCount} info finding(s).`
+      `Kin Review${certified ? "" : ` (${qualification})`}: ${errorCount} error(s), ${warnCount} warning(s), ${result.findings.length - errorCount - warnCount} info finding(s).`
     );
   }
 

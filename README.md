@@ -4,7 +4,11 @@
 
 # Kin for Visual Studio Code
 
-> **A new foundation for code.** Kin is a graph-native code repository for people and AI agents.
+> **A new foundation for code.** Kin is a graph-native code repository for AI agents and the people who build with them.
+
+<!-- Screen capture slot: a 10 to 20 second recording of this extension on a real,
+     named repository (the Graph Browser, a trace, and the status bar), captioned
+     with the repository and the Kin version. Add it only from a real session. -->
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Part of Kin](https://img.shields.io/badge/part%20of-Kin-6E56CF.svg)](https://github.com/firelock-ai/kin)
@@ -18,7 +22,47 @@ and semantic rename, with live daemon and graph health in the status bar.
 The extension does not implement a second index. It delegates queries to the
 local Kin runtime over MCP and falls back to the `kin` CLI when that connection
 is unavailable. Start with **[Kin](https://github.com/firelock-ai/kin)**, a
-graph-native code repository for people and AI agents.
+graph-native code repository for AI agents and the people who build with them.
+
+## Features
+
+- **Graph Browser:** the graph's entities grouped by namespace and kind, listed
+  by name rather than by folder. An entity whose graph name carries no namespace
+  is grouped under a row that says so instead of being filed under a directory.
+- **Entity documents** (`kin://`): open an entity and read its body as the graph
+  serves it, with its kind and name in the tab and its signature, provenance and
+  relations in the hover. **Edit Entity** opens a separate durable draft. **Save**
+  preserves exact draft text, including empty or temporarily invalid code;
+  **Apply Saved Draft** explicitly publishes a saved revision through Kin.
+  Nothing here reads a file: when the graph cannot answer, the viewer says which
+  part could not rather than showing bytes the graph never served.
+- **Graph diagnostics:** what the daemon disclosed about the answer, on the
+  entity you are looking at. Degraded producers, a partial answer, call sites the
+  parser saw and the linker resolved into nothing, pending embeddings, and a
+  standing note that the enrichment counts are observations rather than a
+  guarantee that enrichment finished.
+  Set `kin.entityViewer` to `false` for the older file-first Entity Explorer,
+  which opens the projected file instead.
+- **Semantic Search** (`Cmd/Ctrl+Shift+K S`): natural-language retrieval through
+  `semantic_locate`, with results in a navigable picker. Workspace symbol search
+  (`Cmd/Ctrl+T`) uses Kin's name-pattern graph search.
+- **Trace** (`Cmd/Ctrl+Shift+K T`): focal entity and nearby semantic context.
+  The same graph data supports go-to-definition (`F12`) and hover, which both
+  need the MCP connection. See the runtime notes below.
+- **Graph Overview** (`Cmd/Ctrl+Shift+K O`): entity count for the active
+  workspace, plus edge, file, and entity-kind counts when the daemon reports
+  them. States the graph can be in, such as unreachable or still indexing, are
+  named rather than shown as zeros.
+- **Review** (`Cmd/Ctrl+Shift+K V`): report-only Kin review surfaced as gutter
+  decorations, diagnostics, and the `Kin Review` output channel.
+- **Rename** (`F2`): a Kin rename plan for the selected entity and its graph
+  references.
+- **Status Bar:** indexed entity count, or an honest `not initialized` or
+  `unavailable` state. Click it for the overview. `Kin: Show Status` is what
+  reports the active MCP or CLI path and the graph state.
+- **Multi-root workspaces:** commands resolve the active file's owning workspace
+  before selecting its Kin client. The entity explorer and the status bar follow
+  the first Kin-initialized folder in the workspace.
 
 ## Install, set up, query
 
@@ -92,45 +136,6 @@ Semantic Search calls Kin's `semantic_locate` MCP tool when the persistent MCP
 connection is healthy. Its CLI fallback is graph-backed name-pattern search,
 not equivalent vector/natural-language retrieval. The status surface labels the
 active path as MCP or CLI, and the extension never searches files on its own.
-
-## Features
-
-- **Graph Browser:** the graph's entities grouped by namespace and kind, listed
-  by name rather than by folder. An entity whose graph name carries no namespace
-  is grouped under a row that says so instead of being filed under a directory.
-- **Entity documents** (`kin://`): open an entity and read its body as the graph
-  serves it, with its kind and name in the tab and its signature, provenance and
-  relations in the hover. **Edit Entity** opens a separate durable draft. **Save**
-  preserves exact draft text, including empty or temporarily invalid code;
-  **Apply Saved Draft** explicitly publishes a saved revision through Kin.
-  Nothing here reads a file: when the graph cannot answer, the viewer says which
-  part could not rather than showing bytes the graph never served.
-- **Graph diagnostics:** what the daemon disclosed about the answer, on the
-  entity you are looking at. Degraded producers, a partial answer, call sites the
-  parser saw and the linker resolved into nothing, pending embeddings and the
-  standing fact that enrichment completion is never attested.
-  Set `kin.entityViewer` to `false` for the older file-first Entity Explorer,
-  which opens the projected file instead.
-- **Semantic Search** (`Cmd/Ctrl+Shift+K S`): natural-language retrieval through
-  `semantic_locate`, with results in a navigable picker. Workspace symbol search
-  (`Cmd/Ctrl+T`) uses Kin's name-pattern graph search.
-- **Trace** (`Cmd/Ctrl+Shift+K T`): focal entity and nearby semantic context.
-  The same graph data supports go-to-definition (`F12`) and hover, which both
-  need the MCP connection. See the runtime notes below.
-- **Graph Overview** (`Cmd/Ctrl+Shift+K O`): entity count for the active
-  workspace, plus edge, file, and entity-kind counts when the daemon reports
-  them. States the graph can be in, such as unreachable or still indexing, are
-  named rather than shown as zeros.
-- **Review** (`Cmd/Ctrl+Shift+K V`): report-only Kin review surfaced as gutter
-  decorations, diagnostics, and the `Kin Review` output channel.
-- **Rename** (`F2`): a Kin rename plan for the selected entity and its graph
-  references.
-- **Status Bar:** indexed entity count, or an honest `not initialized` or
-  `unavailable` state. Click it for the overview. `Kin: Show Status` is what
-  reports the active MCP or CLI path and the graph state.
-- **Multi-root workspaces:** commands resolve the active file's owning workspace
-  before selecting its Kin client. The entity explorer and the status bar follow
-  the first Kin-initialized folder in the workspace.
 
 ## Editing and recovering entity drafts
 
@@ -221,9 +226,8 @@ editor tests before updating the supported contract.
 | Surface | Role |
 | --- | --- |
 | [kin](https://github.com/firelock-ai/kin) | Semantic system of record, CLI, daemon, MCP, review, and provenance |
-| [kin-vfs](https://github.com/firelock-ai/kin-vfs) | Transparent graph-backed filesystem projection |
-| [kin-db](https://github.com/firelock-ai/kin-db) | Graph storage, indexing, and retrieval substrate |
-| [KinLab](https://kinlab.ai) | Hosted collaboration and control plane |
+| [kin-db](https://github.com/firelock-ai/kin-db) | Graph storage, indexing, and retrieval |
+| [KinLab](https://kinlab.ai) | Hosted product for teams, in development |
 
 ## Support
 

@@ -47,7 +47,7 @@ jest.mock(
 
 import * as vscode from "vscode";
 import { KinClient } from "../kin-client";
-import { showSearchQuickPick } from "../search-panel";
+import { showSearchQuickPick, showTraceQuickPick } from "../search-panel";
 
 describe("showSearchQuickPick", () => {
   afterEach(() => {
@@ -89,5 +89,89 @@ describe("showSearchQuickPick", () => {
         end: { line: 4, character: 0 },
       }),
     });
+  });
+});
+
+describe("showTraceQuickPick", () => {
+  const CALLER = "1fcd4028-6a1b-4c2d-8e3f-5a7b9c0d1e2f";
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  function traceGraph(record: unknown) {
+    return {
+      isConnected: () => true,
+      callTool: jest.fn(async (tool: string) => {
+        if (tool === "find_references") {
+          return JSON.stringify({
+            references: [
+              {
+                entity_id: CALLER,
+                name: "solve_dependencies",
+                kind: "Function",
+                projection: { path: "fastapi/dependencies/utils.py" },
+                site_count: 1,
+                sites: [{ line_in_entity: 43, callee: "get_dependant" }],
+              },
+            ],
+          });
+        }
+        if (tool === "get_entity") {
+          return JSON.stringify(record);
+        }
+        throw new Error(`unexpected tool ${tool}`);
+      }),
+    };
+  }
+
+  it("lists a caller by its projected file and sites, and opens at the site its record locates", async () => {
+    const mcp = traceGraph({ id: CALLER, span: { start_line: 99 }, start_line: 100 });
+    const client = new KinClient("/workspace", mcp as never);
+    const document = { uri: { fsPath: "/workspace/fastapi/dependencies/utils.py" } };
+    let listed: Array<{ label: string; description: string; detail: string }> = [];
+
+    (vscode.window.showInputBox as jest.Mock).mockResolvedValue("get_dependant");
+    (vscode.window.showQuickPick as jest.Mock).mockImplementation(
+      async (items: Array<{ label: string; description: string; detail: string }>) => {
+        listed = items;
+        return items[0];
+      }
+    );
+    (vscode.workspace.openTextDocument as jest.Mock).mockResolvedValue(document);
+
+    await showTraceQuickPick(client, "/workspace");
+
+    expect(listed.map(({ label, description, detail }) => ({ label, description, detail }))).toEqual([
+      {
+        label: "solve_dependencies",
+        description: "Function - fastapi/dependencies/utils.py",
+        detail: "Sites: +43 get_dependant",
+      },
+    ]);
+    expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith({
+      fsPath: "/workspace/fastapi/dependencies/utils.py",
+    });
+    // File line 99 + 1 + 43 = 143, which the editor's 0-based range holds as 142.
+    expect(vscode.window.showTextDocument).toHaveBeenCalledWith(document, {
+      selection: expect.objectContaining({
+        start: { line: 142, character: 0 },
+        end: { line: 142, character: 0 },
+      }),
+    });
+  });
+
+  it("opens the projected file without a selection when the record gives no position", async () => {
+    const mcp = traceGraph({ id: CALLER });
+    const client = new KinClient("/workspace", mcp as never);
+    const document = { uri: { fsPath: "/workspace/fastapi/dependencies/utils.py" } };
+
+    (vscode.window.showInputBox as jest.Mock).mockResolvedValue("get_dependant");
+    (vscode.window.showQuickPick as jest.Mock).mockImplementation(async (items: unknown[]) => items[0]);
+    (vscode.workspace.openTextDocument as jest.Mock).mockResolvedValue(document);
+
+    await showTraceQuickPick(client, "/workspace");
+
+    expect(vscode.window.showTextDocument).toHaveBeenCalledWith(document);
   });
 });

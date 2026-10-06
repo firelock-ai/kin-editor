@@ -21,6 +21,7 @@ import {
   ContractResult,
   KNOWN_STATUS_SCHEMAS,
   describeDrift,
+  normalizeEntity,
   readEntities,
   readOverview,
   readReview,
@@ -305,6 +306,35 @@ describe("readEntities", () => {
 });
 
 describe("readReview", () => {
+  it("preserves the CLI verdict version for shared diagnostic decoding", () => {
+    const verdict = { state: "inconclusive", limiting_factor: "proof_context_unverified" };
+    const review = expectOk(readReview({
+      file: "old.ts", findings: [], summary: "0 findings",
+      _kin: { envelope_version: 2, verdict },
+    }, "old.ts"));
+    expect(review.envelopeVersion).toBe(2);
+    expect(review.verdict).toEqual(verdict);
+    expect(review).not.toHaveProperty("enrichment");
+  });
+
+  it("preserves a bounded CLI observation and its selected revision with no findings", () => {
+    const enrichment = {
+      scope: "committed_graph",
+      selected_change: "recorded-revision",
+      status: "bounded",
+      limitation: "The selected revision has unsettled call-site evidence.",
+      total_pending_entities: 1,
+      pending_entities: [{ entity_id: "held", name: "caller", projection: { path: "old.ts" } }],
+      entities_withheld: 0,
+    };
+    const review = expectOk(readReview({
+      file: "old.ts", findings: [], summary: "0 findings", enrichment,
+    }, "current.ts"));
+    expect(review.enrichment).toEqual(enrichment);
+    expect(review.findings).toEqual([]);
+    expect(review).not.toHaveProperty("verdict");
+  });
+
   it("reads the real kin 0.6.0 review payload", () => {
     const review = expectOk(readReview(loadFixture("review").payload, "app.py"));
     expect(review.file).toBe("app.py");
@@ -354,6 +384,8 @@ describe("readReview", () => {
     );
     expect(review.findings).toEqual([]);
     expect(review.summary).toBe("no findings");
+    expect(review).not.toHaveProperty("enrichment");
+    expect(review).not.toHaveProperty("verdict");
   });
 
   it("falls back to the reviewed path when a finding omits its file", () => {
@@ -363,5 +395,18 @@ describe("readReview", () => {
     delete payload.findings[0].file;
     const review = expectOk(readReview(payload, "app.py"));
     expect(review.findings[0].file).toBe("app.py");
+  });
+});
+
+describe("normalizeEntity", () => {
+  it("names the file an answer addresses by entity id through projection.path", () => {
+    const entity = normalizeEntity({
+      entity_id: "1fcd4028-6a1b-4c2d-8e3f-5a7b9c0d1e2f",
+      name: "solve_dependencies",
+      kind: "Function",
+      projection: { path: "fastapi/dependencies/utils.py" },
+    });
+
+    expect(entity.file).toBe("fastapi/dependencies/utils.py");
   });
 });

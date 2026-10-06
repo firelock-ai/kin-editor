@@ -88,7 +88,31 @@ function toolText(text) {
   return { content: [{ type: "text", text }] };
 }
 
-function handleToolCall(id, name) {
+// The caller the find_references branch names, and the entity record the
+// get_entity branch serves for it. The record's span starts on graph line 19
+// (0-based), so the row's site at line_in_entity 4 sits on file line 24.
+const CALLER_ID = "7d0c1f52-3a4e-4b8f-9c61-2f0e8a9b4d13";
+const CALLER_RECORD = {
+  id: CALLER_ID,
+  kind: "function",
+  name: "caller",
+  language: "typescript",
+  file_origin: "src/caller.ts",
+  span: {
+    file: "src/caller.ts",
+    start_byte: 412,
+    end_byte: 530,
+    start_line: 19,
+    start_col: 0,
+    end_line: 27,
+    end_col: 1,
+  },
+  signature: "function caller()",
+  start_line: 20,
+  end_line: 28,
+};
+
+function handleToolCall(id, name, args) {
   switch (name) {
     case "kin_graph_status": {
       if (process.env.MOCK_MCP_INVALID_STATUS === "1") {
@@ -146,16 +170,47 @@ function handleToolCall(id, name) {
       return;
     }
     case "find_references": {
+      // A row addresses its caller by entity id and carries no file line: the
+      // file is a projection and each site is counted inside the caller.
       sendResult(
         id,
         toolText(
           JSON.stringify({
+            focal_entity: { kind: "Function", name: "target", projection: { path: "src/target.ts" } },
             references: [
-              { kind: "Function", name: "caller", file_path: "src/caller.ts", start_line: 7 },
+              {
+                entity_id: CALLER_ID,
+                name: "caller",
+                kind: "Function",
+                role: "source",
+                projection: { path: "src/caller.ts" },
+                site_count: 1,
+                sites: [{ line_in_entity: 4, callee: "target" }],
+                sites_absent_reason: null,
+                sites_partial_reason: null,
+                relation_kinds: ["calls"],
+                resolution: "type_resolved",
+                via_override_of: null,
+              },
             ],
           })
         )
       );
+      return;
+    }
+    case "get_entity": {
+      if (args?.entity_id !== CALLER_ID) {
+        send({
+          jsonrpc: "2.0",
+          id,
+          result: {
+            content: [{ type: "text", text: `Entity not found: ${args?.entity_id}` }],
+            isError: true,
+          },
+        });
+        return;
+      }
+      sendResult(id, toolText(JSON.stringify(CALLER_RECORD)));
       return;
     }
     case "echo_cwd": {
