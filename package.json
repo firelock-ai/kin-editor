@@ -1,7 +1,7 @@
 {
   "name": "kin-editor",
-  "displayName": "Kin - Graph-native version control",
-  "description": "VS Code extension for Kin, a graph-native code repository for people and AI agents: entity explorer, semantic search, trace, review, and rename powered by the Kin graph engine.",
+  "displayName": "Kin | A graph-native code repository",
+  "description": "VS Code extension for Kin, a graph-native code repository for AI agents and the people who build with them: entity explorer, semantic search, trace, review, and rename powered by the Kin graph engine.",
   "version": "0.1.15",
   "publisher": "firelock",
   "license": "Apache-2.0",
@@ -9,7 +9,6 @@
     "vscode": "^1.85.0"
   },
   "categories": [
-    "SCM Providers",
     "Programming Languages",
     "AI",
     "Visualization"
@@ -20,7 +19,11 @@
     "graph",
     "ai",
     "agent",
-    "mcp"
+    "mcp",
+    "code-graph",
+    "code-navigation",
+    "semantic-search",
+    "version-control"
   ],
   "repository": {
     "type": "git",
@@ -30,6 +33,7 @@
     "url": "https://github.com/firelock-ai/kin-editor/issues"
   },
   "homepage": "https://kinlab.ai",
+  "qna": "https://github.com/firelock-ai/kin/discussions",
   "icon": "resources/icon.png",
   "galleryBanner": {
     "color": "#0F1117",
@@ -161,12 +165,12 @@
     "viewsWelcome": [
       {
         "view": "kinExplorer",
-        "contents": "A graph-native code repository for people and AI agents.\n\nGit shows which lines changed. Kin shows what the change affects. This folder has no Kin graph yet.\n[Initialize Repository](command:kin.init)\n[Start here](command:kin.openWalkthrough)\nAlready ran kin init? Check what is wired with [Setup Workspace](command:kin.setupWorkspace).",
+        "contents": "A graph-native code repository for AI agents and the people who build with them.\n\nGit shows which lines changed. Kin shows what the change might affect. This folder has no Kin graph yet.\n[Initialize Repository](command:kin.init)\n[Start here](command:kin.openWalkthrough)\nAlready ran kin init? Check what is wired with [Setup Workspace](command:kin.setupWorkspace).",
         "when": "workspaceFolderCount > 0 && !kin.initialized"
       },
       {
         "view": "kinGraph",
-        "contents": "A graph-native code repository for people and AI agents.\n\nGit shows which lines changed. Kin shows what the change affects. This folder has no Kin graph yet.\n[Initialize Repository](command:kin.init)\n[Start here](command:kin.openWalkthrough)\nAlready ran kin init? Check what is wired with [Setup Workspace](command:kin.setupWorkspace).",
+        "contents": "A graph-native code repository for AI agents and the people who build with them.\n\nGit shows which lines changed. Kin shows what the change might affect. This folder has no Kin graph yet.\n[Initialize Repository](command:kin.init)\n[Start here](command:kin.openWalkthrough)\nAlready ran kin init? Check what is wired with [Setup Workspace](command:kin.setupWorkspace).",
         "when": "workspaceFolderCount > 0 && !kin.initialized"
       },
       {
@@ -315,13 +319,13 @@
     "walkthroughs": [
       {
         "id": "kinFirstRun",
-        "title": "A graph-native code repository for people and AI agents.",
-        "description": "Git shows which lines changed. Kin shows what the change affects.",
+        "title": "A graph-native code repository for AI agents and the people who build with them.",
+        "description": "Git shows which lines changed. Kin shows what the change might affect.",
         "steps": [
           {
             "id": "kin.step.whatKinIs",
             "title": "What Kin is",
-            "description": "Kin keeps a living map of the software itself so humans and agents can understand what every change touches. It runs beside Git and it never writes to your `.git`.",
+            "description": "Kin keeps code and its recorded connections together in one repository, for AI agents and the people who build with them. It imports your Git history without changing it or your tracked files.",
             "media": {
               "markdown": "resources/walkthrough/what-kin-is.md"
             },
@@ -399,7 +403,7 @@
     "@types/vscode": "~1.85.0",
     "@typescript-eslint/eslint-plugin": "^8.67.0",
     "@typescript-eslint/parser": "^8.68.0",
-    "@vscode/vsce": "^3.9.2",
+    "@vscode/vsce": "^4.0.0",
     "eslint": "^10.9.1",
     "globals": "^17.12.0",
     "jest": "^30.4.2",
@@ -410,6 +414,9 @@
   "overrides": {
     "brace-expansion": "^5.0.8",
     "minimatch": "^10.2.6",
+    "ovsx": {
+      "@vscode/vsce": "$@vscode/vsce"
+    },
     "test-exclude": "^8.0.0"
   }
 }

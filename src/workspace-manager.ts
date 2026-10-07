@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
-import { existsSync } from "fs";
-import { join } from "path";
 import { KinClient } from "./kin-client";
 import { McpClient } from "./mcp-client";
 import { log } from "./logger";
+import { folderHasKinStore } from "./store-discovery";
 
 export interface WorkspaceEntry {
   folder: vscode.WorkspaceFolder;
@@ -30,8 +29,7 @@ export class WorkspaceManager implements vscode.Disposable {
   constructor(folders: readonly vscode.WorkspaceFolder[], mcpEnabled: boolean) {
     this.mcpEnabled = mcpEnabled;
     for (const folder of folders) {
-      const kinDir = join(folder.uri.fsPath, ".kin");
-      if (existsSync(kinDir)) {
+      if (folderHasKinStore(folder.uri.fsPath)) {
         const mcpClient = this.mcpEnabled ? new McpClient(folder.uri.fsPath) : null;
         const client = new KinClient(folder.uri.fsPath, mcpClient ?? undefined);
         this.entries.set(folder.uri.fsPath, { folder, client, mcpClient });
@@ -50,10 +48,9 @@ export class WorkspaceManager implements vscode.Disposable {
 
     for (const folder of folders) {
       const folderPath = folder.uri.fsPath;
-      const kinDir = join(folderPath, ".kin");
       const existing = this.entries.get(folderPath);
 
-      if (!existsSync(kinDir)) {
+      if (!folderHasKinStore(folderPath)) {
         if (existing) {
           changed = true;
         }

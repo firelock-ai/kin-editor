@@ -55,7 +55,7 @@ jest.mock("../logger", () => ({
   logError: jest.fn(),
 }));
 
-import { McpClient, McpToolError } from "../mcp-client";
+import { MCP_READINESS_BUDGET_SECS, McpClient, McpToolError } from "../mcp-client";
 import { KinClient } from "../kin-client";
 
 jest.setTimeout(20_000);
@@ -187,6 +187,29 @@ describe("MCP live integration (real subprocess, real stdio transport)", () => {
     await client.connect();
     expect(client.isConnected()).toBe(true);
     expect(JSON.parse(readFileSync(join(cwd, "argv.json"), "utf8"))).toEqual(["start", "--tool-profile", "full"]);
+  });
+
+  it("asks the server for a readiness budget inside its own request timeout", async () => {
+    const cwd = makeWorkspace();
+    writeFileSync(join(cwd, "mcp"), `require("fs").writeFileSync("budget.json", JSON.stringify(process.env.KIN_MCP_DAEMON_PATIENCE_SECS ?? null)); import(${JSON.stringify(pathToFileURL(FIXTURE).href)});`);
+    const inherited = process.env.KIN_MCP_DAEMON_PATIENCE_SECS;
+    delete process.env.KIN_MCP_DAEMON_PATIENCE_SECS;
+    try {
+      const client = new McpClient(cwd, { timeoutMs: 5_000 });
+      (client as unknown as { binaryPath: string }).binaryPath = process.execPath;
+      clients.push(client);
+      await client.connect();
+      expect(client.isConnected()).toBe(true);
+    } finally {
+      if (inherited !== undefined) {
+        process.env.KIN_MCP_DAEMON_PATIENCE_SECS = inherited;
+      }
+    }
+    const budget = Number(JSON.parse(readFileSync(join(cwd, "budget.json"), "utf8")));
+    expect(budget).toBe(MCP_READINESS_BUDGET_SECS);
+    // A warming reply has to arrive before the client gives up on the call,
+    // or the retry it would have prompted never happens.
+    expect(budget * 1000).toBeLessThan(15_000);
   });
 
   it("performs the initialize handshake and reports connected", async () => {
@@ -404,6 +427,28 @@ describe("MCP live integration — full KinClient stack (beyond mocks)", () => {
     const results = await kin.search("handler");
     expect(results.length).toBe(2);
     expect(results[0]).toMatchObject({ name: "handler", file: "src/handler.ts", line: 10 });
+  });
+
+  it("opens a traced site at the line its caller's entity record gives, over the real transport", async () => {
+    const workspace = makeWorkspace();
+    const mcp = await connectClient(workspace);
+    const kin = new KinClient(workspace, mcp);
+
+    const [reference] = await kin.trace("target");
+    // The row names a projected file and a site inside the caller, no line.
+    expect(reference).toMatchObject({
+      name: "caller",
+      file: "src/caller.ts",
+      sites: [{ lineInEntity: 4, callee: "target" }],
+    });
+    expect(reference.line).toBeUndefined();
+
+    // The fixture's record puts the caller's span on graph line 19, so the
+    // site at line_in_entity 4 is file line 19 + 1 + 4.
+    const targets = await kin.referenceTargets(reference);
+    expect(targets).toEqual([
+      { file: "src/caller.ts", line: 24, site: { lineInEntity: 4, callee: "target" } },
+    ]);
   });
 
   it("classifies a non-JSON graph-status reply as invalid-response, not an empty graph", async () => {

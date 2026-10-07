@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
-import { KinEntity } from "../kin-client";
+import { KinReference } from "../kin-client";
+import {
+  formatReferenceLocation,
+  formatReferenceSites,
+} from "../graph-references";
 import { WorkspaceManager } from "../workspace-manager";
 
 const HOVER_DEBOUNCE_MS = 300;
@@ -52,7 +56,7 @@ export class KinHoverProvider implements vscode.HoverProvider {
       return undefined;
     }
 
-    let related: KinEntity[];
+    let related: KinReference[];
     try {
       related = await client.traceQuick(word);
     } catch {
@@ -74,7 +78,11 @@ export class KinHoverProvider implements vscode.HoverProvider {
 
     if (primary) {
       md.appendMarkdown(`**${primary.kind}** \`${primary.name}\`\n\n`);
-      md.appendMarkdown(`$(file) \`${primary.file}:${primary.line}\`\n\n`);
+      md.appendMarkdown(`$(file) ${codeSpan(formatReferenceLocation(primary))}\n\n`);
+      const sites = formatReferenceSites(primary);
+      if (sites) {
+        md.appendMarkdown(`Sites inside it: ${codeSpan(sites)}\n\n`);
+      }
       if (primary.signature) {
         md.appendCodeblock(primary.signature, inferLanguage(primary.file));
       }
@@ -84,9 +92,7 @@ export class KinHoverProvider implements vscode.HoverProvider {
       if (others.length > 0) {
         md.appendMarkdown(`\n---\n**Related entities** (${others.length})\n\n`);
         for (const e of others.slice(0, 8)) {
-          md.appendMarkdown(
-            `- \`${e.kind}\` **${e.name}** — \`${e.file}:${e.line}\`\n`
-          );
+          md.appendMarkdown(relatedLine(e));
         }
         if (others.length > 8) {
           md.appendMarkdown(
@@ -98,9 +104,7 @@ export class KinHoverProvider implements vscode.HoverProvider {
       // No exact match — just show all related
       md.appendMarkdown(`**Kin: ${related.length} related entity(ies) for** \`${word}\`\n\n`);
       for (const e of related.slice(0, 8)) {
-        md.appendMarkdown(
-          `- \`${e.kind}\` **${e.name}** — \`${e.file}:${e.line}\`\n`
-        );
+        md.appendMarkdown(relatedLine(e));
       }
       if (related.length > 8) {
         md.appendMarkdown(
@@ -111,6 +115,26 @@ export class KinHoverProvider implements vscode.HoverProvider {
 
     return new vscode.Hover(md, range);
   }
+}
+
+/**
+ * One caller in the hover list: its projected file, and each site inside it as
+ * `+N callee`. A `find_references` row carries no file line, so none is shown;
+ * a line appears only when the answer itself served one.
+ */
+function relatedLine(reference: KinReference): string {
+  const sites = formatReferenceSites(reference);
+  const where = codeSpan(formatReferenceLocation(reference));
+  const at = sites ? ` at ${codeSpan(sites)}` : "";
+  return `- \`${reference.kind}\` **${reference.name}** in ${where}${at}\n`;
+}
+
+/** A Markdown code span that stays one span whatever backticks the text holds. */
+function codeSpan(text: string): string {
+  const runs = text.match(/`+/g) ?? [];
+  const fence = "`".repeat(Math.max(0, ...runs.map((run) => run.length)) + 1);
+  const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
+  return `${fence}${pad}${text}${pad}${fence}`;
 }
 
 function inferLanguage(file: string): string {

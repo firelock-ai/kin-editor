@@ -4,6 +4,25 @@ All notable changes to the Kin VS Code extension are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Trace, hover and go-to-definition read the new `find_references` rows, which address each
+  caller by entity id and carry no file line. The trace picker and hover show the caller's
+  projected file and each usage inside it as `+N callee`. Opening a caller now lands on the
+  usage itself, at the line the caller's entity record gives, instead of line 1 of an unnamed
+  file.
+- The listing names Kin as a graph-native code repository, drops the SCM Providers category
+  (the extension registers no source control provider), and points the Q&A tab at Kin
+  Discussions. The README lists features before the install steps and no longer lists the
+  archived kin-vfs. The first-run lines say what a change might affect, and the walkthrough
+  says Kin imports Git history without changing it or tracked files.
+
+### Fixed
+
+- Preserve review verdicts and enrichment limits across MCP and CLI responses, and show those limits before findings. An empty review is clear only when the daemon explicitly certifies it without pending enrichment.
+- Distinguish admitted source still waiting for a parse from changes the graph has not admitted, and recognize the current certified verdict state in graph diagnostics.
+- Explain unverified proof context in review output and graph diagnostics.
+
 ## [0.1.15] - 2026-09-26
 
 ### Changed

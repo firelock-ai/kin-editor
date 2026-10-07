@@ -77,6 +77,20 @@ const WARMING_MARKERS = [
   "startup latency, not a failure",
 ];
 
+/**
+ * How long `kin mcp start` may hold one call while its repo daemon is still
+ * starting, before it answers with the warming text above.
+ *
+ * The server waits for a starting daemon within each call's readiness budget,
+ * minutes by default, because an agent's call is worth waiting for. This
+ * client times a request out after 15 to 30 seconds and already retries a
+ * warming reply with its own backoff, so it asks for a budget that ends well
+ * inside its own timeout: a call then returns the server's account of the
+ * start, which is shown to the user, rather than a timeout that reads as a
+ * failure. An operator's own `KIN_MCP_DAEMON_PATIENCE_SECS` wins.
+ */
+export const MCP_READINESS_BUDGET_SECS = 10;
+
 export function isWarmingText(text: string): boolean {
   const haystack = text.toLowerCase();
   return WARMING_MARKERS.some((marker) => haystack.includes(marker.toLowerCase()));
@@ -200,7 +214,10 @@ export class McpClient implements vscode.Disposable {
     const proc = spawn(command, args, {
       cwd: this.workspacePath,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
+      env: {
+        KIN_MCP_DAEMON_PATIENCE_SECS: String(MCP_READINESS_BUDGET_SECS),
+        ...process.env,
+      },
     });
 
     proc.on("error", (err) => {

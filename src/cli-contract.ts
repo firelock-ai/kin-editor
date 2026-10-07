@@ -24,6 +24,7 @@ import type {
   KinEntity,
   KinOverview,
   KinReviewFinding,
+  KinReviewEnrichment,
   KinReviewResult,
   KinStatus,
 } from "./kin-client";
@@ -342,13 +343,23 @@ export function readEntities(
 
 export function normalizeEntity(raw: UnknownRecord): KinEntity {
   const provenance = isRecord(raw.provenance) ? raw.provenance : {};
+  const projection = isRecord(raw.projection) ? raw.projection : {};
   const span = Array.isArray(raw.span) ? raw.span : [];
 
   return {
     kind: String(raw.kind ?? raw.entity_kind ?? "Unknown"),
     name: String(raw.name ?? raw.entity_name ?? ""),
+    // `projection.path` is how an answer that addresses by entity id names the
+    // file it projects into, as a `find_references` row does. Rows go through
+    // `normalizeReferenceRow`, which keeps them lineless; this reads the path so
+    // any other answer in that shape still names its file.
     file: String(
-      raw.file ?? raw.file_path ?? raw.read_path ?? provenance.file ?? ""
+      raw.file ??
+        raw.file_path ??
+        raw.read_path ??
+        provenance.file ??
+        projection.path ??
+        ""
     ),
     line: Number(raw.line ?? raw.start_line ?? span[0] ?? 1),
     signature: raw.signature ? String(raw.signature) : undefined,
@@ -436,7 +447,30 @@ export function readReview(
         normalizeReviewFinding(isRecord(raw) ? raw : {}, fallbackFile)
       ),
       summary: String(parsed.summary ?? ""),
+      ...readReviewDisclosure(parsed),
     },
+  };
+}
+
+/** Retain the daemon's observation verbatim; missing metadata proves no scope or state. */
+function readReviewEnrichment(raw: unknown): KinReviewEnrichment | undefined {
+  if (!isRecord(raw) || typeof raw.status !== "string") {
+    return undefined;
+  }
+  return { ...raw, status: raw.status };
+}
+
+/** CLI and MCP carry the same observations at different payload levels. */
+export function readReviewDisclosure(
+  parsed: UnknownRecord
+): Pick<KinReviewResult, "enrichment" | "verdict" | "envelopeVersion"> {
+  const impact = isRecord(parsed.impact) ? parsed.impact : {};
+  const enrichment = readReviewEnrichment(parsed.enrichment ?? impact.enrichment);
+  const envelope = isRecord(parsed._kin) ? parsed._kin : {};
+  return {
+    ...(enrichment ? { enrichment } : {}),
+    ...(isRecord(envelope.verdict) ? { verdict: { ...envelope.verdict } } : {}),
+    ...(Object.hasOwn(envelope, "envelope_version") ? { envelopeVersion: envelope.envelope_version } : {}),
   };
 }
 

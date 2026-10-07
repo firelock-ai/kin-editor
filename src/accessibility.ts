@@ -1,7 +1,8 @@
 // Copyright 2026 Firelock LLC
 // SPDX-License-Identifier: Apache-2.0
 
-import type { KinEntity, KinOverview, KinStatus } from "./kin-client";
+import type { KinEntity, KinOverview, KinReference, KinStatus } from "./kin-client";
+import { formatReferenceLocation, formatReferenceSites } from "./graph-references";
 
 export function formatKindGroupLabel(kind: string, count: number): string {
   return `${kind} (${count})`;
@@ -43,6 +44,20 @@ export function formatSearchResultDescription(entity: KinEntity): string {
 
 export function formatSearchResultDetail(entity: KinEntity): string {
   return entity.signature || entity.kind;
+}
+
+/**
+ * A traced caller's kind and projected file. A `find_references` row carries
+ * no file line, so none is shown unless the answer served one.
+ */
+export function formatTraceResultDescription(reference: KinReference): string {
+  return `${reference.kind} - ${formatReferenceLocation(reference)}`;
+}
+
+/** Each site inside a traced caller as `+N callee`, else its signature. */
+export function formatTraceResultDetail(reference: KinReference): string {
+  const sites = formatReferenceSites(reference);
+  return sites ? `Sites: ${sites}` : reference.signature || reference.kind;
 }
 
 export function formatStatusBarText(status: KinStatus): string {
