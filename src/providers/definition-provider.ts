@@ -2,9 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
-import { KinEntity } from "../kin-client";
+import { KinReference, ReferenceTarget } from "../kin-client";
+import { referenceTargets } from "../graph-references";
 import { WorkspaceManager } from "../workspace-manager";
 import { isAbsolute, join } from "path";
+
+/** How long one caller's entity record may take on this per-word path. */
+const RECORD_TIMEOUT_MS = 3_000;
+
+/**
+ * Callers whose positions are read from their entity records on one jump.
+ * Past this, a caller opens at its projected file with no line, so a symbol
+ * with hundreds of callers cannot fan one Ctrl+hover out into hundreds of
+ * graph reads.
+ */
+const MAX_RESOLVED_CALLERS = 20;
 
 export class KinDefinitionProvider implements vscode.DefinitionProvider {
   constructor(private manager: WorkspaceManager) {}
@@ -30,7 +42,7 @@ export class KinDefinitionProvider implements vscode.DefinitionProvider {
     }
     const workspacePath = client.getWorkspacePath();
 
-    let results: KinEntity[];
+    let results: KinReference[];
     try {
       results = await client.traceQuick(word);
     } catch {
@@ -47,20 +59,34 @@ export class KinDefinitionProvider implements vscode.DefinitionProvider {
     );
     const candidates = exact.length > 0 ? exact : results;
 
-    // Single result — jump directly
-    if (candidates.length === 1) {
-      return toLocation(candidates[0], workspacePath);
-    }
+    // A `find_references` row carries no file line. Each caller's positions
+    // come from its own entity record: one location per site inside it, or the
+    // caller itself when no site has a line.
+    const resolved = await Promise.all(
+      candidates.map((reference, index) =>
+        index < MAX_RESOLVED_CALLERS
+          ? client.referenceTargets(reference, RECORD_TIMEOUT_MS)
+          : Promise.resolve(referenceTargets(reference, undefined))
+      )
+    );
+    const locations = resolved
+      .flat()
+      .map((target) => toLocation(target, workspacePath));
 
-    // Multiple results — return all and let VS Code show peek
-    return candidates.map((e) => toLocation(e, workspacePath));
+    if (locations.length === 0) {
+      return undefined;
+    }
+    // One location jumps directly; several let VS Code show peek.
+    return locations.length === 1 ? locations[0] : locations;
   }
 }
 
-function toLocation(entity: KinEntity, workspacePath: string): vscode.Location {
+function toLocation(target: ReferenceTarget, workspacePath: string): vscode.Location {
   const uri = vscode.Uri.file(
-    isAbsolute(entity.file) ? entity.file : join(workspacePath, entity.file)
+    isAbsolute(target.file) ? target.file : join(workspacePath, target.file)
   );
-  const line = Math.max(0, entity.line - 1);
+  // A target with no derivable line opens the projected file at its top rather
+  // than at an invented line.
+  const line = target.line !== undefined ? Math.max(0, target.line - 1) : 0;
   return new vscode.Location(uri, new vscode.Position(line, 0));
 }

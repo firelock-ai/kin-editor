@@ -39,6 +39,14 @@ import {
 } from "./graph-findings";
 import { EntityNeighborhood, readNeighborhood } from "./graph-relations";
 import {
+  EntityAnchor,
+  KinReference,
+  ReferenceTarget,
+  readEntityAnchor,
+  readReferenceRows,
+  referenceTargets,
+} from "./graph-references";
+import {
   EntityDraft, DraftCreate, DraftSave, DraftApply, DraftApplied, DraftCapabilities,
   DraftList, DraftListing, DraftToolError, draftAssert, draftUuid, draftJson,
   parseEntityDraft, parseDraftSaved, parseDraftApplied, parseDraftCapabilities,
@@ -60,8 +68,15 @@ import {
   readEntities,
   readOverview,
   readReview,
+  readReviewDisclosure,
   readStatus,
 } from "./cli-contract";
+
+export type {
+  KinReference,
+  KinReferenceSite,
+  ReferenceTarget,
+} from "./graph-references";
 
 export interface KinEntity {
   kind: string;
@@ -158,6 +173,14 @@ export interface KinReviewResult {
   file: string;
   findings: KinReviewFinding[];
   summary: string;
+  enrichment?: KinReviewEnrichment;
+  verdict?: Record<string, unknown>;
+  envelopeVersion?: unknown;
+}
+
+/** The selected graph's recorded observation, preserved without inferring scope. */
+export interface KinReviewEnrichment extends Record<string, unknown> {
+  status: string;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -255,7 +278,12 @@ const QUICK_TRACE_CACHE_TTL_MS = 5_000;
 
 interface QuickTraceCacheEntry {
   expiresAt: number;
-  promise: Promise<KinEntity[]>;
+  promise: Promise<KinReference[]>;
+}
+
+interface EntityAnchorCacheEntry {
+  expiresAt: number;
+  promise: Promise<EntityAnchor | undefined>;
 }
 
 export class KinClient {
@@ -270,6 +298,12 @@ export class KinClient {
    * (or MCP round-trip) per word.
    */
   private quickTraceCache = new Map<string, QuickTraceCacheEntry>();
+
+  /**
+   * Short-lived cache of callers' entity records, keyed by entity id, so a
+   * hover-then-click on the same reference asks `get_entity` once.
+   */
+  private entityAnchorCache = new Map<string, EntityAnchorCacheEntry>();
 
   /** Contract drifts and schema notes already shown, so each is shown once. */
   private reportedContractIssues = new Set<string>();
@@ -665,7 +699,7 @@ export class KinClient {
     }
   }
 
-  async trace(entity: string): Promise<KinEntity[]> {
+  async trace(entity: string): Promise<KinReference[]> {
     if (this.isMcpConnected()) {
       try {
         const raw = await this.callToolWarm(
@@ -673,7 +707,7 @@ export class KinClient {
           { query: entity },
           this.queryTimeoutMs(),
         );
-        return this.parseEntitiesFromMcp(raw);
+        return this.parseReferencesFromMcp(raw);
       } catch (err) {
         if (isWarmingError(err)) {
           throw err;
@@ -688,7 +722,7 @@ export class KinClient {
     );
   }
 
-  async traceQuick(entity: string): Promise<KinEntity[]> {
+  async traceQuick(entity: string): Promise<KinReference[]> {
     const now = Date.now();
     const cached = this.quickTraceCache.get(entity);
     if (cached && cached.expiresAt > now) {
@@ -715,7 +749,7 @@ export class KinClient {
    * per hover. With `kin.mcpEnabled` off, or before the MCP connection is live,
    * it returns nothing and those two features stay quiet.
    */
-  private async runQuickTrace(entity: string): Promise<KinEntity[]> {
+  private async runQuickTrace(entity: string): Promise<KinReference[]> {
     if (!this.isMcpConnected()) {
       return [];
     }
@@ -725,9 +759,79 @@ export class KinClient {
         { query: entity },
         3_000,
       );
-      return this.parseEntitiesFromMcp(raw);
+      return this.parseReferencesFromMcp(raw);
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * Where to open one traced reference.
+   *
+   * A `find_references` row carries no file line, so this asks the graph for
+   * the caller's entity record by id and computes each site's line from it
+   * (`span.start_line` + 1 + `line_in_entity`), or the caller's own line
+   * (`start_line`) when no site has one. A reference that already carries a
+   * served line, from the CLI fallback, is opened there without a call. When
+   * the record cannot be read the target is the projected file with no line,
+   * never a guessed one.
+   *
+   * Called when a user opens a reference, not per row of a reply, and MCP only
+   * for the same reason as {@link runQuickTrace}: the record is a graph read.
+   */
+  async referenceTargets(
+    reference: KinReference,
+    timeoutMs = this.queryTimeoutMs()
+  ): Promise<ReferenceTarget[]> {
+    if (reference.line !== undefined || !reference.id) {
+      return referenceTargets(reference, undefined);
+    }
+    const anchor = await this.entityAnchor(reference.id, timeoutMs);
+    return referenceTargets(reference, anchor);
+  }
+
+  private entityAnchor(
+    entityId: string,
+    timeoutMs: number
+  ): Promise<EntityAnchor | undefined> {
+    const now = Date.now();
+    const cached = this.entityAnchorCache.get(entityId);
+    if (cached && cached.expiresAt > now) {
+      return cached.promise;
+    }
+    const promise = this.fetchEntityAnchor(entityId, timeoutMs);
+    this.entityAnchorCache.set(entityId, {
+      expiresAt: now + QUICK_TRACE_CACHE_TTL_MS,
+      promise,
+    });
+    // A record that could not be read is not remembered, so the next open
+    // asks again instead of reusing the miss.
+    void promise.then((anchor) => {
+      const current = this.entityAnchorCache.get(entityId);
+      if (!anchor && current && current.promise === promise) {
+        this.entityAnchorCache.delete(entityId);
+      }
+    });
+    return promise;
+  }
+
+  private async fetchEntityAnchor(
+    entityId: string,
+    timeoutMs: number
+  ): Promise<EntityAnchor | undefined> {
+    if (!this.isMcpConnected()) {
+      return undefined;
+    }
+    try {
+      const raw = await this.mcpClient!.callTool(
+        "get_entity",
+        { entity_id: entityId },
+        timeoutMs,
+      );
+      return readEntityAnchor(raw, entityId);
+    } catch (err) {
+      logError(`get_entity failed for ${entityId}; opening its file without a line`, err);
+      return undefined;
     }
   }
 
@@ -1075,7 +1179,9 @@ export class KinClient {
         return [];
       }
 
-      for (const key of ["results", "entities", "references"]) {
+      // `references` is not read here: a `find_references` row is not an entity
+      // and carries no line, so it goes through parseReferencesFromMcp.
+      for (const key of ["results", "entities"]) {
         const value = parsed[key];
         if (Array.isArray(value)) {
           return value.map(normalizeEntity).filter((entity) => entity.name || entity.file);
@@ -1093,6 +1199,15 @@ export class KinClient {
       // Not JSON — return empty (caller should fall back to CLI)
       return [];
     }
+  }
+
+  /**
+   * A `find_references` reply. Its `references` rows are read as references;
+   * a reply without them (a name that resolved to no rows but did name a
+   * focal entity, say) falls back to the entity reader.
+   */
+  private parseReferencesFromMcp(raw: string): KinReference[] {
+    return readReferenceRows(raw) ?? this.parseEntitiesFromMcp(raw);
   }
 
   private parseOverviewFromMcp(raw: string): KinOverview {
@@ -1162,6 +1277,8 @@ export class KinClient {
         return undefined;
       }
 
+      const disclosure = readReviewDisclosure(parsed);
+
       if (Array.isArray(parsed.findings)) {
         return {
           file: String(parsed.file ?? filePath),
@@ -1169,6 +1286,7 @@ export class KinClient {
             normalizeReviewFinding(asRecord(finding), filePath)
           ),
           summary: String(parsed.summary ?? ""),
+          ...disclosure,
         };
       }
 
@@ -1179,6 +1297,7 @@ export class KinClient {
             this.normalizeInlineComment(comment, filePath)
           ),
           summary: this.reviewSummary(parsed),
+          ...disclosure,
         };
       }
 
@@ -1187,6 +1306,7 @@ export class KinClient {
           file: filePath,
           findings: [],
           summary: parsed.summary,
+          ...disclosure,
         };
       }
 

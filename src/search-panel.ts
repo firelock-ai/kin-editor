@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
-import { KinClient, KinEntity } from "./kin-client";
+import { KinClient, KinEntity, KinReference } from "./kin-client";
 import { isAbsolute, join } from "path";
 import {
   describeError,
   formatSearchResultDescription,
   formatSearchResultDetail,
   formatSearchResultLabel,
+  formatTraceResultDescription,
+  formatTraceResultDetail,
 } from "./accessibility";
 
 /**
@@ -94,7 +96,7 @@ export async function showTraceQuickPick(
     return;
   }
 
-  let results: KinEntity[];
+  let results: KinReference[];
   try {
     results = await client.trace(entity);
   } catch (err) {
@@ -109,11 +111,11 @@ export async function showTraceQuickPick(
     return;
   }
 
-  const items = results.map((e) => ({
-    label: formatSearchResultLabel(e),
-    description: formatSearchResultDescription(e),
-    detail: formatSearchResultDetail(e),
-    entity: e,
+  const items = results.map((reference) => ({
+    label: reference.name,
+    description: formatTraceResultDescription(reference),
+    detail: formatTraceResultDetail(reference),
+    reference,
   }));
 
   const selected = await vscode.window.showQuickPick(items, {
@@ -121,9 +123,17 @@ export async function showTraceQuickPick(
   });
 
   if (selected) {
-    const uri = resolveEntityUri(workspacePath, selected.entity.file);
-    const line = selected.entity.line - 1;
+    // A `find_references` row carries no file line. The client reads the
+    // caller's entity record and lands on its first site, or on the caller
+    // when no site has a line. With no position, the file opens unselected.
+    const [target] = await client.referenceTargets(selected.reference);
+    const uri = resolveEntityUri(workspacePath, target.file);
     const doc = await vscode.workspace.openTextDocument(uri);
+    if (target.line === undefined) {
+      await vscode.window.showTextDocument(doc);
+      return;
+    }
+    const line = target.line - 1;
     await vscode.window.showTextDocument(doc, {
       selection: new vscode.Range(line, 0, line, 0),
     });

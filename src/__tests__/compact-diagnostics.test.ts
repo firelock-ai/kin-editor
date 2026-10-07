@@ -29,6 +29,19 @@ describe("versioned MCP diagnostic rendering", () => {
     expect(message.match(/did not report which languages/g)).toHaveLength(1);
   });
 
+  it("explains unverified proof context without promising a current sweep changes recorded evidence", () => {
+    const findings = findingsFromPayload({ _kin: { envelope_version: 2, verdict: {
+      state: "inconclusive", limiting_factor: "proof_context_unverified",
+    } } });
+    expect(findings).toEqual([expect.objectContaining({
+      code: "verdict.inconclusive", severity: "warning",
+    })]);
+    expect(findings[0].message).toContain("selected graph has no verified call-site proof context");
+    expect(findings[0].message).toContain("Recorded calls remain evidence");
+    expect(findings[0].message).toContain("missing references are not proof of absence");
+    expect(findings[0].message).not.toMatch(/proof_context_unverified|Unknown Kin diagnostic|sweep/);
+  });
+
   it("uses the public condition's specific recovery guidance", () => {
     const message = render({ envelope_version: 2, verdict: {
       state: "inconclusive", limiting_factor: "file_bytes_unadmitted; walk_depth_bounded",
@@ -89,9 +102,9 @@ describe("versioned MCP diagnostic rendering", () => {
     expect(message).toContain("do not treat this answer as complete");
   });
 
-  it("keeps an unknown condition visible even beside a conclusive verdict or exact count", () => {
+  it.each(["certified", "conclusive"])("keeps an unknown condition visible even beside a %s verdict or exact count", (state) => {
     const message = render({ envelope_version: 2,
-      verdict: { state: "conclusive", limiting_factor: "future_verdict" },
+      verdict: { state, limiting_factor: "future_verdict" },
       completeness: { status: "complete", bound: "exact", limits: ["future_limit"] },
       semantic_coverage: { complete: true, pending: 0, indexed: 10, total: 10, limited_by: ["future_coverage"] },
     });
@@ -103,7 +116,7 @@ describe("versioned MCP diagnostic rendering", () => {
 
   it("does not assume a future version still assigns today's meaning to a code", () => {
     const findings = findingsFromPayload({ _kin: { envelope_version: 3,
-      verdict: { state: "conclusive", limiting_factor: "response_bounded" },
+      verdict: { state: "certified", limiting_factor: "response_bounded" },
       completeness: { status: "complete", bound: "exact" },
     } });
     expect(findings).toContainEqual(expect.objectContaining({ code: "envelope.unsupported_version", severity: "warning" }));
@@ -111,11 +124,40 @@ describe("versioned MCP diagnostic rendering", () => {
     expect(findings.map((finding) => finding.message).join("\n")).not.toContain("response budget");
   });
 
-  it("leaves a clean current envelope free of invented findings", () => {
+  it.each(["certified", "conclusive"])("leaves a clean %s envelope free of invented findings", (state) => {
     expect(findingsFromPayload({ _kin: { envelope_version: 2,
-      verdict: { state: "conclusive", limiting_factor: null },
+      verdict: { state, limiting_factor: null },
       completeness: { status: "complete", bound: "exact", limits: [] },
       semantic_coverage: { complete: true, indexed: 10, total: 10, pending: 0, limited_by: [] },
     } })).toEqual([]);
+  });
+
+  it("retains independent limits beside the current certified verdict", () => {
+    const findings = findingsFromPayload({ _kin: { envelope_version: 2,
+      verdict: { state: "certified", limiting_factor: null },
+      completeness: { status: "partial", bound: "at_least", limits: ["response_bounded"] },
+      degraded: { sweep_suspended: true },
+    } });
+    expect(findings.map((finding) => finding.code).sort()).toEqual([
+      "completeness.partial", "degraded.sweep_suspended",
+    ]);
+    expect(findings.every((finding) => finding.severity === "warning")).toBe(true);
+    expect(findings.map((finding) => finding.message).join(" ")).toContain("response budget");
+  });
+
+  it("retains a certified verdict's additive producer explanation", () => {
+    expect(render({ envelope_version: 2, verdict: {
+      state: "certified", limiting_factor: null, note: "Check this additional producer condition.",
+    } })).toContain("Check this additional producer condition.");
+  });
+
+  it("does not treat an unknown verdict state as certified", () => {
+    const findings = findingsFromPayload({ _kin: { envelope_version: 2,
+      verdict: { state: "future_state", limiting_factor: null },
+    } });
+    expect(findings).toContainEqual(expect.objectContaining({
+      code: "verdict.future_state", severity: "warning",
+    }));
+    expect(findings[0].message).toContain("do not read an absence as proof");
   });
 });

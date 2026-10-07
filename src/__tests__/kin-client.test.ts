@@ -453,10 +453,15 @@ describe("KinClient", () => {
         callTool: jest.fn().mockResolvedValue(JSON.stringify({
           references: [
             {
+              entity_id: "5b1e0c8a-2f4d-4e6a-9b7c-1d3f5a7c9e02",
               kind: "Function",
               name: "caller",
-              file_path: "src/caller.ts",
-              start_line: 7,
+              role: "source",
+              projection: { path: "src/caller.ts" },
+              site_count: 1,
+              sites: [{ line_in_entity: 6, callee: "target" }],
+              sites_absent_reason: null,
+              sites_partial_reason: null,
             },
           ],
         })),
@@ -470,11 +475,56 @@ describe("KinClient", () => {
         { query: "target" },
         30_000
       );
-      expect(result[0]).toMatchObject({
+      expect(result[0]).toEqual({
+        id: "5b1e0c8a-2f4d-4e6a-9b7c-1d3f5a7c9e02",
+        kind: "Function",
         name: "caller",
         file: "src/caller.ts",
-        line: 7,
+        sites: [{ lineInEntity: 6, callee: "target" }],
       });
+      // The row carries no file line, and none is made up for it.
+      expect(result[0].line).toBeUndefined();
+    });
+
+    it.each([
+      { findings: [], summary: "0 findings" },
+      { inline_comments: [], summary: "0 findings" },
+      { summary: "0 findings" },
+    ])("preserves selected MCP review limits across readable shapes: %j", async (shape) => {
+      const enrichment = {
+        scope: "committed_graph", selected_change: "historical-revision",
+        status: "bounded", limitation: "The selected revision has unresolved calls.",
+        total_pending_entities: 2, pending_entities: [], entities_withheld: 2,
+      };
+      const verdict = {
+        state: "inconclusive", safe_to_conclude_absent: false,
+        limiting_factor: "enrichment_incomplete",
+      };
+      const mcp = {
+        isConnected: () => true,
+        callTool: jest.fn().mockResolvedValue(JSON.stringify({
+          ...shape, impact: { enrichment }, _kin: { envelope_version: 2, verdict },
+        })),
+      };
+      const result = await new KinClient("/workspace", mcp as never).review("/workspace/src/demo.ts");
+      expect(result.findings).toEqual([]);
+      expect(result.enrichment).toEqual(enrichment);
+      expect(result.verdict).toEqual(verdict);
+      expect(result.envelopeVersion).toBe(2);
+      expect(mockExecFile).not.toHaveBeenCalled();
+    });
+
+    it("retains an unknown MCP verdict without inventing enrichment", async () => {
+      const verdict = { state: "future-state", limiting_factor: "future-condition" };
+      const mcp = {
+        isConnected: () => true,
+        callTool: jest.fn().mockResolvedValue(JSON.stringify({
+          inline_comments: [], _kin: { verdict },
+        })),
+      };
+      const result = await new KinClient("/workspace", mcp as never).review("/workspace/src/demo.ts");
+      expect(result.verdict).toEqual(verdict);
+      expect(result).not.toHaveProperty("enrichment");
     });
 
     it("maps structured MCP semantic_review comments to findings", async () => {
@@ -622,7 +672,18 @@ describe("KinClient", () => {
       const mcp = {
         isConnected: () => true,
         callTool: jest.fn().mockResolvedValue(
-          JSON.stringify({ references: [{ name: "foo", file_path: "src/foo.ts", start_line: 1 }] })
+          JSON.stringify({
+            references: [
+              {
+                entity_id: "0a4c6e82-1b3d-4f5a-8c7e-9d1f3b5a7c90",
+                name: "foo",
+                kind: "Function",
+                projection: { path: "src/foo.ts" },
+                site_count: 1,
+                sites: [{ line_in_entity: 0, callee: "foo" }],
+              },
+            ],
+          })
         ),
       };
 
@@ -638,6 +699,251 @@ describe("KinClient", () => {
       // A second call within the TTL reuses the cached result — still one call.
       await client.traceQuick("foo");
       expect(mcp.callTool).toHaveBeenCalledTimes(1);
+    });
+
+    describe("opening a find_references row", () => {
+      const CALLER = "1fcd4028-6a1b-4c2d-8e3f-5a7b9c0d1e2f";
+
+      /** An MCP stand-in answering find_references with `row` and get_entity with `record`. */
+      function graph(row: Record<string, unknown>, record: unknown) {
+        return {
+          isConnected: () => true,
+          callTool: jest.fn(async (tool: string, args: Record<string, unknown>) => {
+            if (tool === "find_references") {
+              return JSON.stringify({
+                focal_entity: {
+                  name: "get_dependant",
+                  projection: { path: "fastapi/dependencies/utils.py" },
+                },
+                references: [row],
+              });
+            }
+            if (tool === "get_entity") {
+              if (record instanceof Error) {
+                throw record;
+              }
+              expect(args).toEqual({ entity_id: CALLER });
+              return JSON.stringify(record);
+            }
+            throw new Error(`unexpected tool ${tool}`);
+          }),
+        };
+      }
+
+      const row = {
+        entity_id: CALLER,
+        name: "solve_dependencies",
+        kind: "Function",
+        role: "source",
+        projection: { path: "fastapi/dependencies/utils.py" },
+        site_count: 1,
+        sites: [{ line_in_entity: 43, callee: "get_dependant" }],
+        sites_absent_reason: null,
+        sites_partial_reason: "incomplete_call_evidence",
+        relation_kinds: ["calls"],
+        resolution: "type_resolved",
+        via_override_of: null,
+      };
+
+      /** A get_entity record whose span starts on 0-based graph line `spanStart`. */
+      function record(spanStart: number) {
+        return {
+          id: CALLER,
+          kind: "function",
+          name: "solve_dependencies",
+          file_origin: "fastapi/dependencies/utils.py",
+          span: {
+            file: "fastapi/dependencies/utils.py",
+            start_byte: 0,
+            end_byte: 1,
+            start_line: spanStart,
+            start_col: 0,
+            end_line: spanStart + 80,
+            end_col: 0,
+          },
+          start_line: spanStart + 1,
+          end_line: spanStart + 81,
+        };
+      }
+
+      it("reads the focal's projected file when a reply carries no reference rows", async () => {
+        // The entity fallback: a reply with a focal and no `references` array
+        // names the focal, whose file is only its labelled projection.
+        const mcp = {
+          isConnected: () => true,
+          callTool: jest.fn(async () =>
+            JSON.stringify({
+              focal_entity: {
+                id: CALLER,
+                name: "get_dependant",
+                kind: "Function",
+                projection: { path: "fastapi/dependencies/utils.py" },
+              },
+            })
+          ),
+        };
+        const client = new KinClient("/workspace", mcp as never);
+        const [focal] = await client.trace("get_dependant");
+
+        expect(focal).toMatchObject({
+          id: CALLER,
+          name: "get_dependant",
+          file: "fastapi/dependencies/utils.py",
+        });
+      });
+
+      it("normalizes the row to its projected file and its sites, with no line", async () => {
+        const client = new KinClient("/workspace", graph(row, record(0)) as never);
+        const [reference] = await client.trace("get_dependant");
+
+        expect(reference).toEqual({
+          id: CALLER,
+          kind: "Function",
+          name: "solve_dependencies",
+          file: "fastapi/dependencies/utils.py",
+          sites: [{ lineInEntity: 43, callee: "get_dependant" }],
+          sitesPartialReason: "incomplete_call_evidence",
+        });
+      });
+
+      it("computes the site's file line from the caller's entity record, not from the row", async () => {
+        // The same row against two records that disagree about where the
+        // caller starts. The jump follows the record each time, so nothing in
+        // the row is being read as a line.
+        for (const [spanStart, expected] of [
+          [99, 99 + 1 + 43],
+          [310, 310 + 1 + 43],
+        ]) {
+          const mcp = graph(row, record(spanStart));
+          const client = new KinClient("/workspace", mcp as never);
+          const [reference] = await client.trace("get_dependant");
+          const targets = await client.referenceTargets(reference);
+
+          expect(mcp.callTool).toHaveBeenCalledWith(
+            "get_entity",
+            { entity_id: CALLER },
+            30_000
+          );
+          expect(targets).toEqual([
+            {
+              file: "fastapi/dependencies/utils.py",
+              line: expected,
+              site: { lineInEntity: 43, callee: "get_dependant" },
+            },
+          ]);
+        }
+      });
+
+      it("lands on the caller's own start_line when no site has a line", async () => {
+        const withoutSites = {
+          ...row,
+          site_count: 0,
+          sites: [],
+          sites_absent_reason: "no_evidence_span",
+          sites_partial_reason: null,
+        };
+        const client = new KinClient("/workspace", graph(withoutSites, record(99)) as never);
+        const [reference] = await client.trace("get_dependant");
+
+        expect(await client.referenceTargets(reference)).toEqual([
+          { file: "fastapi/dependencies/utils.py", line: 100 },
+        ]);
+      });
+
+      it("skips a site outside the caller's span and falls back to the caller", async () => {
+        const outside = {
+          ...row,
+          sites: [{ line_in_entity: null, callee: "get_dependant" }],
+        };
+        const client = new KinClient("/workspace", graph(outside, record(99)) as never);
+        const [reference] = await client.trace("get_dependant");
+
+        expect(reference.sites).toEqual([{ lineInEntity: null, callee: "get_dependant" }]);
+        expect(await client.referenceTargets(reference)).toEqual([
+          { file: "fastapi/dependencies/utils.py", line: 100 },
+        ]);
+      });
+
+      it("opens the projected file with no line when the record cannot be read", async () => {
+        const client = new KinClient(
+          "/workspace",
+          graph(row, new Error("Entity not found")) as never
+        );
+        const [reference] = await client.trace("get_dependant");
+
+        expect(await client.referenceTargets(reference)).toEqual([
+          { file: "fastapi/dependencies/utils.py" },
+        ]);
+      });
+
+      it("opens the projected file with no line when the record has no span", async () => {
+        const { span: _span, start_line: _start, ...spanless } = record(99);
+        const client = new KinClient("/workspace", graph(row, spanless) as never);
+        const [reference] = await client.trace("get_dependant");
+
+        expect(await client.referenceTargets(reference)).toEqual([
+          { file: "fastapi/dependencies/utils.py" },
+        ]);
+      });
+
+      it("refuses a record for another entity than the one asked for", async () => {
+        const client = new KinClient(
+          "/workspace",
+          graph(row, { ...record(99), id: "ffffffff-0000-4000-8000-000000000000" }) as never
+        );
+        const [reference] = await client.trace("get_dependant");
+
+        expect(await client.referenceTargets(reference)).toEqual([
+          { file: "fastapi/dependencies/utils.py" },
+        ]);
+      });
+
+      it("asks for nothing when the row has no entity id to ask about", async () => {
+        const federated = { ...row, entity_id: null, projection: { path: "other-repo:src/x.py" } };
+        const mcp = graph(federated, record(99));
+        const client = new KinClient("/workspace", mcp as never);
+        const [reference] = await client.trace("get_dependant");
+
+        expect(await client.referenceTargets(reference)).toEqual([
+          { file: "other-repo:src/x.py" },
+        ]);
+        expect(mcp.callTool).not.toHaveBeenCalledWith("get_entity", expect.anything(), expect.anything());
+      });
+
+      it("keeps a line an older daemon served, without asking for the record", async () => {
+        const legacy = {
+          entity_id: CALLER,
+          kind: "Function",
+          name: "solve_dependencies",
+          file_path: "fastapi/dependencies/utils.py",
+          start_line: 100,
+          reference_lines: [144],
+        };
+        const mcp = graph(legacy, record(99));
+        const client = new KinClient("/workspace", mcp as never);
+        const [reference] = await client.trace("get_dependant");
+
+        expect(reference).toMatchObject({ file: "fastapi/dependencies/utils.py", line: 100 });
+        expect(await client.referenceTargets(reference)).toEqual([
+          { file: "fastapi/dependencies/utils.py", line: 100 },
+        ]);
+        expect(mcp.callTool).not.toHaveBeenCalledWith("get_entity", expect.anything(), expect.anything());
+      });
+
+      it("reads one caller's record once for a hover and the click after it", async () => {
+        const mcp = graph(row, record(99));
+        const client = new KinClient("/workspace", mcp as never);
+        const [reference] = await client.trace("get_dependant");
+
+        await Promise.all([
+          client.referenceTargets(reference, 3_000),
+          client.referenceTargets(reference, 3_000),
+        ]);
+        await client.referenceTargets(reference, 3_000);
+
+        const recordCalls = mcp.callTool.mock.calls.filter(([tool]) => tool === "get_entity");
+        expect(recordCalls).toHaveLength(1);
+      });
     });
 
     it("symbolSearch uses semantic_search (name-pattern), not semantic_locate", async () => {
@@ -743,6 +1049,22 @@ describe("KinClient", () => {
       const review = await new KinClient("/workspace").review("/workspace/app.py");
       expect(review.findings).toHaveLength(3);
       expect(review.summary).toBe("Overall risk: Low; 3 finding(s)");
+      expect(mockShowWarningMessage).not.toHaveBeenCalled();
+      expect(review).not.toHaveProperty("enrichment");
+      expect(review).not.toHaveProperty("verdict");
+    });
+
+    it("retains bounded CLI review evidence with no findings", async () => {
+      const enrichment = {
+        status: "bounded", scope: "selected_graph_repository", selected_change: null,
+        limitation: "Impact counts are a lower bound.", total_pending_entities: 1,
+        pending_entities: [{ entity_id: "held", name: "caller", projection: { path: "app.py" } }],
+      };
+      serve({ file: "app.py", findings: [], summary: "0 findings", enrichment });
+      const review = await new KinClient("/workspace").review("/workspace/app.py");
+      expect(review.findings).toEqual([]);
+      expect(review.enrichment).toEqual(enrichment);
+      expect(review).not.toHaveProperty("verdict");
       expect(mockShowWarningMessage).not.toHaveBeenCalled();
     });
 

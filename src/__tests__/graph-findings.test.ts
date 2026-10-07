@@ -150,6 +150,63 @@ describe("findings from a tool response", () => {
     ).toContain("src/new.rs");
   });
 
+  it("discloses an owed parse even when every path was admitted", () => {
+    const findings = findingsFromPayload({ _kin: {
+      envelope_version: 2,
+      behind: {
+        unadmitted_paths: 0,
+        measured: true,
+        measured_age_seconds: 4,
+        underived_paths: 1,
+        underived_sample: ["linkgraph/predicates.py"],
+      },
+    } });
+    expect(codes(findings)).toEqual(["behind.underived_paths"]);
+    expect(findings[0].severity).toBe("warning");
+    expect(findings[0].message).toContain("1 admitted path is still owed a parse");
+    expect(findings[0].message).toContain("linkgraph/predicates.py");
+    expect(findings[0].message).toContain("next commit records that parse");
+    expect(findings[0].message).not.toMatch(/never took|kin admit|kin daemon sweep/);
+  });
+
+  it("keeps admitted and underived samples separate and bounded", () => {
+    const findings = findingsFromPayload({ _kin: { behind: {
+      unadmitted_paths: 1,
+      sample: ["new.py"],
+      underived_paths: 4,
+      underived_sample: ["owed1.py", "owed2.py", "owed3.py", "owed4.py"],
+      note: "The producer reports that parsing is deferred.",
+    } } });
+    expect(codes(findings).sort()).toEqual(["behind.unadmitted_paths", "behind.underived_paths"]);
+    const admitted = findings.find((finding) => finding.code === "behind.unadmitted_paths")!;
+    const underived = findings.find((finding) => finding.code === "behind.underived_paths")!;
+    expect(admitted.message).toContain("new.py");
+    expect(admitted.message).not.toContain("owed1.py");
+    expect(underived.message).toContain("4 admitted paths are still owed a parse");
+    expect(underived.message).toContain("owed1.py, owed2.py, owed3.py");
+    expect(underived.message).not.toMatch(/new.py|owed4.py/);
+    expect(underived.message).toContain("The producer reports that parsing is deferred.");
+  });
+
+  it("does not invent parse debt from a missing or zero underived count", () => {
+    for (const underived_paths of [undefined, null, 0]) {
+      expect(findingsFromPayload({ _kin: { behind: {
+        unadmitted_paths: 0, underived_paths, underived_sample: ["old-sample.py"],
+      } } })).toEqual([]);
+    }
+  });
+
+  it("decodes the current behind clause without claiming only admission is missing", () => {
+    const findings = findingsFromPayload({ _kin: {
+      envelope_version: 2,
+      verdict: { state: "inconclusive", limiting_factor: "graph_behind_working_tree" },
+      behind: { unadmitted_paths: 0, underived_paths: 1, underived_sample: ["owed.py"] },
+    } });
+    expect(codes(findings).sort()).toEqual(["behind.underived_paths", "verdict.inconclusive"]);
+    expect(findings.find((finding) => finding.code === "verdict.inconclusive")?.message)
+      .toContain("or admitted paths are still owed their parse");
+  });
+
   it("says nothing about freshness the daemon recorded, and speaks about the rest", () => {
     expect(
       findingsFromPayload({

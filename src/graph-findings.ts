@@ -251,19 +251,25 @@ function degradedFindings(degraded: unknown): GraphFinding[] {
   return findings;
 }
 
-function verdictFindings(verdict: unknown, version: unknown): GraphFinding[] {
-  if (!isRecord(verdict)) {
-    return [];
-  }
-  const state = str(verdict.state);
+/** Decode verdict conditions without changing their selected graph scope. */
+export function verdictDetail(verdict: unknown, version: unknown): string | undefined {
+  if (!isRecord(verdict)) return undefined;
   const limiting = str(verdict.limiting_factor);
   const note = str(verdict.note);
   const coded = version !== undefined && version !== 1;
   const factor = limiting
     ? coded ? diagnosticDetail(limiting.split(";"), version) : limiting
     : undefined;
-  const detail = coded ? [factor, note].filter(Boolean).join(" ") : factor ?? note;
-  if (!state || (state === "conclusive" && !(coded && limiting))) {
+  return coded ? [factor, note].filter(Boolean).join(" ") : factor ?? note;
+}
+
+function verdictFindings(verdict: unknown, version: unknown): GraphFinding[] {
+  if (!isRecord(verdict)) return [];
+  const state = str(verdict.state);
+  const coded = version !== undefined && version !== 1;
+  const detail = verdictDetail(verdict, version);
+  const certifying = state === "certified" || state === "conclusive";
+  if (!state || (certifying && !detail)) {
     return [];
   }
   return [
@@ -274,8 +280,8 @@ function verdictFindings(verdict: unknown, version: unknown): GraphFinding[] {
       // acted on. That is a warning, not a note.
       severity: state === "inconclusive" || coded ? "warning" : "info",
       message:
-        (state === "conclusive"
-          ? "Kin returned diagnostic conditions alongside a conclusive verdict. Review them before relying on this answer."
+        (certifying
+          ? `Kin returned diagnostic conditions alongside a ${state} verdict. Review them before relying on this answer.`
           : `Kin's verdict for this answer is "${state}", so treat what it contains as a lower bound and do not read an absence as proof.`) +
         (detail ? ` ${detail}` : ""),
     },
@@ -349,23 +355,38 @@ function behindFindings(behind: unknown): GraphFinding[] {
     return [];
   }
   const unadmitted = num(behind.unadmitted_paths) ?? 0;
-  if (unadmitted === 0) {
-    return [];
-  }
+  const underived = num(behind.underived_paths) ?? 0;
   const note = str(behind.note);
-  const sample = Array.isArray(behind.sample)
-    ? behind.sample.filter((entry): entry is string => typeof entry === "string")
-    : [];
-  return [
-    {
+  const examples = (value: unknown): string => {
+    const sample = Array.isArray(value)
+      ? value.filter((entry): entry is string => typeof entry === "string").slice(0, 3)
+      : [];
+    return sample.length > 0 ? ` For example: ${sample.join(", ")}.` : "";
+  };
+  const findings: GraphFinding[] = [];
+  if (unadmitted > 0) {
+    findings.push({
       code: "behind.unadmitted_paths",
       severity: "warning",
       message:
         `Graph truth is behind the working copy: ${unadmitted} path${unadmitted === 1 ? "" : "s"} the graph never took.` +
         (note ? ` ${note}` : "") +
-        (sample.length > 0 ? ` For example: ${sample.slice(0, 3).join(", ")}.` : ""),
-    },
-  ];
+        examples(behind.sample),
+    });
+  }
+  if (underived > 0) {
+    findings.push({
+      code: "behind.underived_paths",
+      severity: "warning",
+      message:
+        `Graph truth is behind the working copy: ${underived} admitted path${underived === 1 ? " is" : "s are"} still owed a parse, so the bytes are admitted but their entities are not yet derived.` +
+        // Match GraphBehind's recorded parse remedy, not the admission remedy
+        // for paths the graph never took. A language-server sweep is unrelated.
+        (note ? ` ${note}` : " The next commit records that parse.") +
+        examples(behind.underived_sample),
+    });
+  }
+  return findings;
 }
 
 function freshnessFindings(freshness: unknown): GraphFinding[] {
