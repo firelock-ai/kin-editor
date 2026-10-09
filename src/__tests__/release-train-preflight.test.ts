@@ -6,7 +6,7 @@ import { join, resolve } from "path";
 
 const REPO_ROOT = resolve(__dirname, "..", "..");
 const SCRIPT = join(REPO_ROOT, "scripts", "release-train-preflight.mjs");
-const REPOSITORY = "firelock-ai/kin-editor";
+const REPOSITORY = "kinlab-ai/kin-editor";
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
 const BRANCH = "automation/release-next";
 
@@ -18,7 +18,7 @@ function pull(overrides = {}) {
     headRefOid: HEAD,
     isCrossRepository: false,
     headRepository: { nameWithOwner: REPOSITORY },
-    headRepositoryOwner: { login: "firelock-ai" },
+    headRepositoryOwner: { login: "kinlab-ai" },
     headCommitSubject: "Release Kin Editor v0.1.2",
     mergeStateStatus: "CLEAN",
     ...overrides,
