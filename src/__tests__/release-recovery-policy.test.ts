@@ -13,7 +13,7 @@ const WORKFLOW = join(
   "workflows",
   "release-recovery.yml",
 );
-const REPOSITORY = "firelock-ai/kin-editor";
+const REPOSITORY = "kinlab-ai/kin-editor";
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 
 function releaseRun(attempt: number, overrides = {}) {
@@ -108,7 +108,7 @@ describe("release recovery policy", () => {
     expect(issue.body).toContain("`v0.1.2`");
     expect(issue.body).toContain(`\`${SHA}\``);
     expect(issue.body).toContain(
-      "https://github.com/firelock-ai/kin-editor/actions/runs/4003",
+      "https://github.com/kinlab-ai/kin-editor/actions/runs/4003",
     );
 
     const laterRun = policy(
@@ -116,7 +116,7 @@ describe("release recovery policy", () => {
       releaseRun(4, {
         id: 9004,
         html_url:
-          "https://github.com/firelock-ai/kin-editor/actions/runs/9004",
+          "https://github.com/kinlab-ai/kin-editor/actions/runs/9004",
       }),
     );
     expect(laterRun.status).toBe(0);
@@ -124,7 +124,7 @@ describe("release recovery policy", () => {
     expect(updated.marker).toBe(issue.marker);
     expect(updated.title).toBe(issue.title);
     expect(updated.body).toContain(
-      "https://github.com/firelock-ai/kin-editor/actions/runs/9004",
+      "https://github.com/kinlab-ai/kin-editor/actions/runs/9004",
     );
     expect(updated.body).toContain("Run attempt: `4`");
   });
