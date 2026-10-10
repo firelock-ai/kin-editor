@@ -77,7 +77,9 @@ jobs:
           test -f "kin-${version}.vsix"
           echo "packaged kin-${version}.vsix"
       - name: Audit (high/critical)
-        run: npm audit --audit-level=high
+        # Equivalent to `npm audit --audit-level=high` but with a narrow,
+        # documented allowlist; see scripts/audit-high.mjs.
+        run: node ./scripts/audit-high.mjs
 
       # Actions caches are scoped to the ref that saved them, so only main's
       # cache is readable from every other ref; save only from there.
