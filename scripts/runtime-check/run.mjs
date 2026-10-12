@@ -31,8 +31,8 @@ const { downloadAndUnzipVSCode, resolveCliPathFromVSCodeExecutablePath, runTests
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HOST_DIR = path.join(HERE, "host");
 const EXTENSION_ID = "firelock.kin-editor";
-const KIN_REPO = "firelock-ai/kin";
-const EDITOR_REPO = "firelock-ai/kin-editor";
+const KIN_REPO = "kinlab-ai/kin";
+const EDITOR_REPO = "kinlab-ai/kin-editor";
 const SESSION_TIMEOUT_MS = 8 * 60 * 1000;
 
 const FIXTURE = {

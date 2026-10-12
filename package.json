@@ -24,10 +24,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/firelock-ai/kin-editor"
+    "url": "https://github.com/kinlab-ai/kin-editor"
   },
   "bugs": {
-    "url": "https://github.com/firelock-ai/kin-editor/issues"
+    "url": "https://github.com/kinlab-ai/kin-editor/issues"
   },
   "homepage": "https://kinlab.ai",
   "icon": "resources/icon.png",

@@ -7,7 +7,7 @@ import { join, resolve } from "path";
 
 const REPO_ROOT = resolve(__dirname, "..", "..");
 const SCRIPT = join(REPO_ROOT, "scripts", "release-train-ci-policy.mjs");
-const REPOSITORY = "firelock-ai/kin-editor";
+const REPOSITORY = "kinlab-ai/kin-editor";
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
 const BRANCH = "automation/release-next";
 const TRAIN_WORKFLOW = readFileSync(

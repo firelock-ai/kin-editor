@@ -48,7 +48,7 @@ jobs:
         with:
           app-id: ${{ secrets.KIN_RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.KIN_RELEASE_BOT_PRIVATE_KEY }}
-          owner: firelock-ai
+          owner: kinlab-ai
           repositories: kin-editor
           permission-administration: read
           permission-contents: write
@@ -586,8 +586,8 @@ jobs:
               --jq '[
                 .[] |
                 select(
-                  .headRepositoryOwner.login == "firelock-ai" and
-                  .headRepository.nameWithOwner == "firelock-ai/kin-editor"
+                  .headRepositoryOwner.login == "kinlab-ai" and
+                  .headRepository.nameWithOwner == "kinlab-ai/kin-editor"
                 )
               ] | if length > 1 then error("multiple release-train PRs")
                   else .[0].number // "" end'
