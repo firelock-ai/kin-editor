@@ -4,6 +4,14 @@ All notable changes to the Kin VS Code extension are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-10-12
+
+### Changed
+
+- Remove the merge queue ejection notice workflow (#142)
+- Repoint Actions refs to kinlab-ai (#139)
+- fix(deps): bump undici 7.30.0 (GHSA-3wwx-pv8p-q78v) + brace-expansion, handlebars (#140)
+
 ## [0.1.15] - 2026-09-26
 
 ### Changed
