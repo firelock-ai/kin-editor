@@ -162,8 +162,21 @@ function runInTerminal(commandLine: string, cwd: string | undefined): void {
   terminal.sendText(commandLine);
 }
 
-function quoteArg(arg: string): string {
-  return /\s/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg;
+/**
+ * Quote one argument for the shell behind the integrated terminal. A POSIX
+ * shell gets single quotes, inside which no character is special, so each `'`
+ * closes the quote, adds an escaped quote and reopens it. Windows shells do not
+ * treat a backslash as an escape and a Windows path cannot contain `"`, so there
+ * a path with whitespace is only wrapped in double quotes.
+ */
+export function quoteArg(arg: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") {
+    return /\s/.test(arg) ? `"${arg}"` : arg;
+  }
+  if (/^[\w@%+=:,./-]+$/.test(arg)) {
+    return arg;
+  }
+  return `'${arg.replace(/'/g, "'\\''")}'`;
 }
 
 // ---------------------------------------------------------------------------
