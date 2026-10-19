@@ -4,6 +4,14 @@ All notable changes to the Kin VS Code extension are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.17] - 2026-10-19
+
+### Changed
+
+- Move markdown-it past its linkify advisory and drop sprintf-js (#148)
+- Single-quote the kin binary path typed into the terminal (#147)
+- Give every workflow an explicit read-only token (#146)
+
 ## [0.1.16] - 2026-10-12
 
 ### Changed
